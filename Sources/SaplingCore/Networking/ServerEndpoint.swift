@@ -25,6 +25,14 @@ public enum ServerEndpoint {
             return url
         }
         if let saved = ClientConfig.load().server, let url = normalize(saved) { return url }
+        // Where the local daemon says it bound, which beats inferring it from
+        // config — `bind = "tailscale"` resolves to an address only the daemon
+        // knows.
+        if let published = try? String(contentsOf: SaplingPaths.endpointFile, encoding: .utf8),
+            let url = normalize(published.trimmingCharacters(in: .whitespacesAndNewlines))
+        {
+            return url
+        }
         if let local = try? SaplingConfig.load() {
             let host = local.server.bindMode == .tailscale ? "127.0.0.1" : local.server.bind
             if let url = normalize("\(host):\(local.server.port)") { return url }

@@ -26,6 +26,12 @@ public enum SaplingPaths {
     public static var runnerCacheDirectory: URL { home.appendingPathComponent("runner-cache") }
     /// Private key the agent uses to reach macOS VMs.
     public static var sshKeyFile: URL { home.appendingPathComponent("vm_ed25519") }
+    /// Where the daemon records the address it actually bound.
+    ///
+    /// Clients on the node read this rather than guessing: with
+    /// `bind = "tailscale"` the listener is on the tailnet address, so
+    /// assuming loopback means the CLI cannot reach its own daemon.
+    public static var endpointFile: URL { home.appendingPathComponent("endpoint") }
 
     /// launchd job label for the daemon.
     public static let launchDaemonLabel = "dev.sapling.daemon"

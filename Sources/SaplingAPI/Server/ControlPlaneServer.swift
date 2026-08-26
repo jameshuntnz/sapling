@@ -41,6 +41,10 @@ public struct ControlPlaneServer: Sendable {
             app.middleware.use(JSONErrorMiddleware())
 
             let advertised = "http://\(resolution.hostname):\(config.server.port)"
+            // Publish it so the CLI on this machine can find us without
+            // having to work out the bind address for itself.
+            try? SaplingPaths.ensureHomeDirectory()
+            try? advertised.write(to: SaplingPaths.endpointFile, atomically: true, encoding: .utf8)
             try registerRoutes(app, controlPlane: controlPlane, advertisedURL: advertised)
 
             Log.info("control plane listening on \(advertised) (\(resolution.description))")
