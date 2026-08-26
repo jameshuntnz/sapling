@@ -24,8 +24,6 @@ final class UpstreamHitCounter: @unchecked Sendable {
 /// stale-on-upstream-failure — against a local stand-in registry.
 @Suite("Cache proxy", .serialized)
 struct CacheProxyTests {
-    static let port = 18802
-
     func withUpstream<T>(
         proxies: [String] = ["go", "cargo"],
         mutableTTL: TimeInterval = 60,
@@ -37,7 +35,7 @@ struct CacheProxyTests {
         env.arguments = ["fake-registry"]
         let app = try await Application.make(env)
         app.http.server.configuration.hostname = "127.0.0.1"
-        app.http.server.configuration.port = Self.port
+        app.http.server.configuration.port = 0
         app.logger.logLevel = .critical
 
         app.get([.catchall]) { request -> Response in
@@ -52,8 +50,13 @@ struct CacheProxyTests {
         }
 
         try await app.startup()
-
-        let base = "http://127.0.0.1:\(Self.port)"
+        // Ephemeral: a fixed port collides with a socket a previous test still
+        // holds, which surfaces as "Address already in use" on slower machines.
+        guard let boundPort = app.http.server.shared.localAddress?.port else {
+            try? await app.asyncShutdown()
+            throw CacheProxyTestError.noBoundPort
+        }
+        let base = "http://127.0.0.1:\(boundPort)"
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("sapling-cache-\(UUID().uuidString)")
 
@@ -255,4 +258,8 @@ struct CacheProxyTests {
         #expect(npm.immutableMatcher("lodash/-/lodash-4.17.21.tgz"))
         #expect(!npm.immutableMatcher("lodash"))
     }
+}
+
+enum CacheProxyTestError: Error {
+    case noBoundPort
 }

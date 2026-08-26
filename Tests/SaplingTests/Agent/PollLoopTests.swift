@@ -12,7 +12,6 @@ import Testing
 /// whole poll-to-store path without needing a VM to dispatch to.
 @Suite("Poll loop", .serialized)
 struct PollLoopTests {
-    static let port = 18803
 
     func withFakeGitHub<T>(
         labels: (macos: [String], linux: [String]) = (
@@ -23,7 +22,7 @@ struct PollLoopTests {
         var fixtures = FakeGitHubFixtures()
         fixtures.queuedRunIDs = [100]
         fixtures.jobsByRun = [100: FakeGitHubFixtureLibrary.threePlatforms]
-        let server = try await FakeGitHubServer.start(port: Self.port, fixtures: fixtures)
+        let server = try await FakeGitHubServer.start(fixtures: fixtures)
 
         var config = SaplingConfig()
         config.node.name = "mini"
@@ -126,13 +125,12 @@ struct PollLoopTests {
 /// available: the build looks green and nothing was built.
 @Suite("Job conclusion", .serialized)
 struct JobConclusionTests {
-    static let port = 18805
 
     func withFakeGitHub<T>(_ body: (NodeAgent) async throws -> T) async throws -> T {
         var fixtures = FakeGitHubFixtures()
         fixtures.queuedRunIDs = [100]
         fixtures.jobsByRun = [100: FakeGitHubFixtureLibrary.threePlatforms]
-        let server = try await FakeGitHubServer.start(port: Self.port, fixtures: fixtures)
+        let server = try await FakeGitHubServer.start(fixtures: fixtures)
 
         var config = SaplingConfig()
         config.node.name = "mini"

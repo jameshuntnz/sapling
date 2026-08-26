@@ -11,8 +11,6 @@ import Vapor
 /// app decode shows up here rather than on the Mac mini.
 @Suite("REST API", .serialized)
 struct APITests {
-    static let port = 18734
-
     func withServer<T>(
         _ body: (SaplingStore, SaplingClient) async throws -> T
     ) async throws -> T {
@@ -21,7 +19,7 @@ struct APITests {
         config.node.name = "test-node"
         config.github.repos = ["acme/widgets"]
         config.server.bind = "loopback"
-        config.server.port = Self.port
+        config.server.port = 0
 
         try await store.upsertNode(
             Node(
@@ -38,14 +36,19 @@ struct APITests {
         env.arguments = ["sapling-test"]
         let app = try await Application.make(env)
         app.http.server.configuration.hostname = "127.0.0.1"
-        app.http.server.configuration.port = Self.port
+        app.http.server.configuration.port = 0
         app.logger.logLevel = .critical
         app.middleware = .init()
         app.middleware.use(JSONErrorMiddleware())
-        try registerRoutes(app, controlPlane: controlPlane, advertisedURL: "http://127.0.0.1:\(Self.port)")
+        try registerRoutes(
+            app, controlPlane: controlPlane,
+            advertisedURL: "http://127.0.0.1:\(app.http.server.configuration.port)")
 
         try await app.startup()
-        let client = SaplingClient(baseURL: URL(string: "http://127.0.0.1:\(Self.port)")!)
+        // An ephemeral port: fixed ones collide when a previous test's socket
+        // is still held, which fails as "Address already in use".
+        let port = try #require(app.http.server.shared.localAddress?.port)
+        let client = SaplingClient(baseURL: try #require(URL(string: "http://127.0.0.1:\(port)")))
         do {
             let result = try await body(store, client)
             try await app.asyncShutdown()
@@ -175,7 +178,8 @@ struct APITests {
                 #expect(error.message.contains("does-not-exist"))
             }
 
-            let url = URL(string: "http://127.0.0.1:\(Self.port)/api/v1/jobs?status=nonsense")!
+            let url = try #require(
+                URL(string: client.baseURL.absoluteString + "/api/v1/jobs?status=nonsense"))
             let (data, response) = try await URLSession.shared.data(from: url)
             #expect((response as? HTTPURLResponse)?.statusCode == 400)
             let decoded = try SaplingJSON.decoder.decode(APIErrorResponse.self, from: data)

@@ -7,7 +7,6 @@ import Testing
 /// Exercises `GitHubClient` against the shared fake GitHub API.
 @Suite("GitHub client", .serialized)
 struct GitHubClientTests {
-    static let port = 18801
 
     func withFakeGitHub<T>(
         _ body: (GitHubClient, FakeGitHubState) async throws -> T
@@ -20,7 +19,7 @@ struct GitHubClientTests {
             200: FakeGitHubFixtureLibrary.queuedBehindRunningRun,
         ]
 
-        let server = try await FakeGitHubServer.start(port: Self.port, fixtures: fixtures)
+        let server = try await FakeGitHubServer.start(fixtures: fixtures)
         let client = GitHubClient(config: server.githubConfig())
         do {
             let result = try await body(client, server.state)

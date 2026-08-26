@@ -47,14 +47,20 @@ struct FakeGitHubServer {
     let state: FakeGitHubState
     let baseURL: String
 
-    static func start(port: Int, fixtures: FakeGitHubFixtures) async throws -> FakeGitHubServer {
+    /// Binds an ephemeral port rather than a fixed one.
+    ///
+    /// Fixed ports collide: a server from a previous test can still hold the
+    /// socket when the next one binds, which fails as
+    /// `Address already in use` on whichever machine happens to be slower.
+    /// Letting the kernel choose removes the whole class of flake.
+    static func start(fixtures: FakeGitHubFixtures) async throws -> FakeGitHubServer {
         let state = FakeGitHubState()
 
         var environment = Environment.testing
         environment.arguments = ["fake-github"]
         let app = try await Application.make(environment)
         app.http.server.configuration.hostname = "127.0.0.1"
-        app.http.server.configuration.port = port
+        app.http.server.configuration.port = 0
         app.logger.logLevel = .critical
 
         app.get("repos", ":owner", ":repo", "actions", "runs") { request -> Response in
@@ -131,7 +137,11 @@ struct FakeGitHubServer {
         }
 
         try await app.startup()
-        return FakeGitHubServer(app: app, state: state, baseURL: "http://127.0.0.1:\(port)")
+        guard let boundPort = app.http.server.shared.localAddress?.port else {
+            try? await app.asyncShutdown()
+            throw ProviderError("fake GitHub server reported no bound port")
+        }
+        return FakeGitHubServer(app: app, state: state, baseURL: "http://127.0.0.1:\(boundPort)")
     }
 
     static func json(_ raw: String, status: HTTPResponseStatus = .ok) -> Response {
