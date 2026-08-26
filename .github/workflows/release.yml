@@ -103,7 +103,15 @@ jobs:
 
           if [ "${{ steps.version.outputs.channel }}" = "stable" ]; then
             git add Sources/SaplingCore/Models/DTOs.swift
-            git commit -m "chore(release): ${TAG} [skip ci]"
+            # The stamped version can already match what's in the source — the
+            # first stable release does, since 0.1.0 is also the placeholder.
+            # `git commit` exits 1 on an empty commit, which would fail a
+            # release that is otherwise entirely fine.
+            if git diff --cached --quiet; then
+              echo "version already recorded in the source"
+            else
+              git commit -m "chore(release): ${TAG} [skip ci]"
+            fi
           fi
 
           # Idempotent: a previous attempt may have pushed the tag before
