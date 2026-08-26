@@ -60,6 +60,7 @@ jobs:
       - name: Verify
         if: steps.version.outputs.release == 'true'
         run: |
+          ./scripts/check-workflows.sh
           ./scripts/lint.sh
           ./scripts/check-file-sizes.sh
           ./scripts/test-next-version.sh

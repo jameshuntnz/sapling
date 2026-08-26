@@ -17,6 +17,7 @@ test: ## Run the test suite
 
 lint: ## Fail on style or documentation violations
 	@./scripts/lint.sh
+	@./scripts/check-workflows.sh
 
 format: ## Reformat sources in place
 	@./scripts/format.sh

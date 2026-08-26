@@ -31,6 +31,9 @@ jobs:
           key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-
 
+      - name: Workflows
+        run: ./scripts/check-workflows.sh
+
       - name: Lint
         run: ./scripts/lint.sh
 
