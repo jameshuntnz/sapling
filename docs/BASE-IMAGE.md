@@ -6,12 +6,35 @@ You do this once. After that, every macOS job clones this image, runs, and delet
 
 ---
 
+## Match the toolchain to what you build against
+
+Pick the image whose Xcode matches the toolchain your project targets, not
+just whatever is newest to hand. The guest's macOS version does *not* have to
+match the host's — but its Swift version has to satisfy your build.
+
+This bites in unhelpful ways. A Sequoia image ships Swift 6.1; a repository
+developed against Swift 6.3 will fail there, and not always obviously —
+`swift-format` reports an unrecognised configuration as
+"the data couldn't be read because it isn't in the correct format", once per
+source file, with no mention of versions.
+
+Check before you commit to an 80GB download:
+
+```bash
+tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest sapling-macos-base
+tart run --no-graphics sapling-macos-base &
+ssh admin@$(tart ip sapling-macos-base) 'swift --version; swift format --version'
+```
+
+Cirrus publishes `macos-{tahoe,sequoia,sonoma}-xcode`, and tags for specific
+Xcode versions. Tahoe is macOS 26.
+
 ## Fastest route: start from a prepared image
 
 Cirrus Labs publishes images with Xcode already installed.
 
 ```bash
-tart clone ghcr.io/cirruslabs/macos-sequoia-xcode:latest sapling-macos-base
+tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest sapling-macos-base
 ```
 
 That pulls ~50GB. It arrives with a user `admin` / password `admin` and Remote Login already on, so you only need steps 2 and 3 below.
