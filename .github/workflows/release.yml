@@ -106,28 +106,62 @@ jobs:
             git commit -m "chore(release): ${TAG} [skip ci]"
           fi
 
-          git tag -a "$TAG" -m "${{ steps.version.outputs.version }}"
+          # Idempotent: a previous attempt may have pushed the tag before
+          # failing later on, and a re-run must not stop there.
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG already exists locally"
+          else
+            git tag -a "$TAG" -m "${{ steps.version.outputs.version }}"
+          fi
 
           if [ "${{ steps.version.outputs.channel }}" = "stable" ]; then
             git push origin HEAD:main
           fi
-          git push origin "$TAG"
+          git push origin "$TAG" 2>&1 | tail -2 || echo "tag already on the remote"
 
+      # Uses the REST API rather than `gh`, which the base VM image does not
+      # carry — and adding it would be one more thing the image has to keep
+      # up to date. curl is always present.
       - name: Publish
         if: steps.version.outputs.release == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          set -euo pipefail
           TAG="${{ steps.version.outputs.tag }}"
           CHANNEL="${{ steps.version.outputs.channel }}"
-          # Anything that isn't a finished release is marked prerelease, so
-          # `gh release list` and the update checker can tell them apart
-          # without parsing version strings.
-          PRERELEASE=""
-          [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "hotfix" ] || PRERELEASE="--prerelease"
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes \
-            $PRERELEASE \
-            dist/*.tar.gz dist/SHA256SUMS
+          # Anything not finished is flagged prerelease, so the update checker
+          # and a person reading the releases page agree without either having
+          # to parse version strings.
+          PRERELEASE=true
+          if [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "hotfix" ]; then
+            PRERELEASE=false
+          fi
+
+          api() { curl -sS -H "Authorization: Bearer $TOKEN" \
+                       -H "Accept: application/vnd.github+json" \
+                       -H "X-GitHub-Api-Version: 2022-11-28" "$@"; }
+
+          BODY=$(printf '{"tag_name":"%s","name":"%s","prerelease":%s,"generate_release_notes":true}' \
+                 "$TAG" "$TAG" "$PRERELEASE")
+          RESPONSE=$(api -X POST -d "$BODY" "https://api.github.com/repos/$REPO/releases")
+
+          RELEASE_ID=$(printf '%s' "$RESPONSE" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')
+          if [ -z "$RELEASE_ID" ]; then
+            echo "could not create the release:"; printf '%s\n' "$RESPONSE"; exit 1
+          fi
+          echo "created release $RELEASE_ID for $TAG"
+
+          for FILE in dist/*.tar.gz dist/SHA256SUMS; do
+            NAME=$(basename "$FILE")
+            echo "uploading $NAME"
+            curl -sS --fail-with-body \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$FILE" \
+              "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=$NAME" \
+              > /dev/null
+          done
+          echo "published $TAG"
