@@ -45,9 +45,15 @@ jobs:
             echo "Nothing to release on $CHANNEL: no feat/fix/perf commits since the last release."
             echo "release=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Releasing $VERSION on $CHANNEL"
+            # Build metadata stays in the version the binary reports, but is
+            # stripped from the tag: "+" is literal in a URL path and a space
+            # in a query string, which is a good way to lose a release. Semver
+            # ignores it for precedence, so the tag loses nothing that matters.
+            TAG="v${VERSION%%+*}"
+            echo "Releasing $VERSION on $CHANNEL as $TAG"
             echo "release=true" >> "$GITHUB_OUTPUT"
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           fi
 
       # Never publish something that does not pass its own checks.
@@ -69,34 +75,42 @@ jobs:
       - name: Build and package
         if: steps.version.outputs.release == 'true'
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          # Named from the tag rather than the version: an asset name carrying
+          # "+" risks being mangled in transit, and the daemon matches the
+          # downloaded file's name against SHA256SUMS when verifying it.
+          NAME="${{ steps.version.outputs.tag }}"
+          NAME="sapling-${NAME#v}-macos-arm64.tar.gz"
           swift build -c release --product sapling
           mkdir -p dist && cp .build/release/sapling dist/
-          tar -czf "dist/sapling-${VERSION}-macos-arm64.tar.gz" -C dist sapling
+          tar -czf "dist/$NAME" -C dist sapling
           rm dist/sapling
           cd dist
           # The daemon verifies this before installing anything it downloads.
           shasum -a 256 *.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Tag
-        if: steps.version.outputs.release == 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${VERSION}" -m "v${VERSION}"
-          git push origin "v${VERSION}"
-
       # Only a finished release moves the version recorded in the source. A dev
       # build's version is derived, and committing one per push would both spam
-      # main and re-trigger this workflow.
-      - name: Record the version on main
-        if: steps.version.outputs.release == 'true' && steps.version.outputs.channel == 'stable'
+      # main and re-trigger this workflow. Done before tagging so a stable tag
+      # points at the commit recording that version, not the one before it.
+      - name: Tag and record
+        if: steps.version.outputs.release == 'true'
         run: |
-          git add Sources/SaplingCore/Models/DTOs.swift
-          git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
-          git push origin HEAD:main
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "${{ steps.version.outputs.channel }}" = "stable" ]; then
+            git add Sources/SaplingCore/Models/DTOs.swift
+            git commit -m "chore(release): ${TAG} [skip ci]"
+          fi
+
+          git tag -a "$TAG" -m "${{ steps.version.outputs.version }}"
+
+          if [ "${{ steps.version.outputs.channel }}" = "stable" ]; then
+            git push origin HEAD:main
+          fi
+          git push origin "$TAG"
 
       - name: Publish
         if: steps.version.outputs.release == 'true'
@@ -104,14 +118,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
           CHANNEL="${{ steps.version.outputs.channel }}"
           # Anything that isn't a finished release is marked prerelease, so
           # `gh release list` and the update checker can tell them apart
           # without parsing version strings.
           PRERELEASE=""
           [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "hotfix" ] || PRERELEASE="--prerelease"
-          gh release create "v${VERSION}" \
-            --title "v${VERSION}" \
+          gh release create "$TAG" \
+            --title "$TAG" \
             --generate-notes \
             $PRERELEASE \
             dist/*.tar.gz dist/SHA256SUMS
