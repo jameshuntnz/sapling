@@ -64,14 +64,16 @@ public struct TartProvider: JobProvider, Sendable {
         }
 
         await events.record(RunEventName.vmCloned, detail: "cloning \(config.baseImage) -> \(vmName)")
+        let cloneCommand = try await Self.tart(["clone", config.baseImage, vmName])
         try await ProcessRunner.runChecked(
-            "tart", ["clone", config.baseImage, vmName], timeout: .seconds(600))
+            cloneCommand.executable, cloneCommand.arguments, timeout: .seconds(600))
 
         var setArgs = ["set", vmName]
         if let cpu = config.cpuCount { setArgs += ["--cpu", String(cpu)] }
         if let memory = config.memoryGB { setArgs += ["--memory", String(memory * 1024)] }
         if setArgs.count > 2 {
-            try await ProcessRunner.runChecked("tart", setArgs)
+            let setCommand = try await Self.tart(setArgs)
+            try await ProcessRunner.runChecked(setCommand.executable, setCommand.arguments)
         }
 
         // `tart run` blocks for the VM's lifetime, so it stays a background
