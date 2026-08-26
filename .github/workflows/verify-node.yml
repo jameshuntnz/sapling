@@ -1,0 +1,98 @@
+# Verification workflow for a Sapling node, following docs/TESTING.md.
+#
+# Run this by hand after provisioning a node, or after a macOS update. It is
+# not part of CI — it exists to prove the node behaves, not to test the code.
+name: Verify node
+
+on:
+  workflow_dispatch:
+    inputs:
+      lan_target:
+        description: "A private address on your LAN that jobs must NOT reach (e.g. your router)"
+        required: true
+        default: "192.168.0.1"
+      tailnet_target:
+        description: "A tailnet address that jobs must NOT reach"
+        required: true
+        default: "100.66.217.76"
+
+jobs:
+  # --- TESTING.md phase 2 ---------------------------------------------------
+  linux:
+    runs-on: [self-hosted, linux, arm64]
+    timeout-minutes: 15
+    steps:
+      - run: uname -a
+      - run: echo "container hostname: $(hostname)"
+      - uses: actions/checkout@v4
+      - run: ls -la
+
+  # --- TESTING.md phase 3 ---------------------------------------------------
+  macos:
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 30
+    steps:
+      - run: sw_vers
+      - run: uname -m
+      - run: xcodebuild -version || echo "no Xcode in this image"
+      - uses: actions/checkout@v4
+      - run: ls -la
+
+  # --- TESTING.md phase 4: the one that actually matters --------------------
+  # A job may reach the internet and nothing else. If this passes on a machine
+  # where the filter is off, it would pass silently — so it asserts both
+  # directions: the internet IS reachable, the LAN and tailnet are NOT.
+  egress-linux:
+    runs-on: [self-hosted, linux, arm64]
+    timeout-minutes: 15
+    steps:
+      - name: Internet must be reachable
+        run: |
+          curl -sS --max-time 15 https://api.github.com/zen
+          echo
+
+      - name: LAN must be unreachable
+        run: |
+          if curl -sS --max-time 5 "http://${{ inputs.lan_target }}" >/dev/null 2>&1; then
+            echo "FAIL: reached ${{ inputs.lan_target }} from inside a job"
+            exit 1
+          fi
+          echo "ok: ${{ inputs.lan_target }} unreachable"
+
+      - name: Tailnet must be unreachable
+        run: |
+          if curl -sS --max-time 5 "http://${{ inputs.tailnet_target }}:8734/api/v1/status" >/dev/null 2>&1; then
+            echo "FAIL: reached the Sapling control plane from inside a job"
+            exit 1
+          fi
+          echo "ok: tailnet unreachable"
+
+  egress-macos:
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 20
+    steps:
+      - name: Internet must be reachable
+        run: |
+          curl -sS --max-time 15 https://api.github.com/zen
+          echo
+
+      - name: LAN must be unreachable
+        run: |
+          if curl -sS --max-time 5 "http://${{ inputs.lan_target }}" >/dev/null 2>&1; then
+            echo "FAIL: reached ${{ inputs.lan_target }} from inside a VM"
+            exit 1
+          fi
+          echo "ok: ${{ inputs.lan_target }} unreachable"
+
+  # --- TESTING.md phase 5 ---------------------------------------------------
+  # Apple allows two concurrent macOS VMs. Three at once must never produce
+  # 3/2; the third waits. Watch `sapling status` while this runs.
+  concurrency-limit:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 20
+    steps:
+      - run: echo "shard ${{ matrix.shard }} on $(hostname)"; sleep 90

@@ -15,7 +15,11 @@ echo "Building SaplingMenuBar ($CONFIG)…"
 swift build -c "$CONFIG" --product SaplingMenuBar
 
 BIN="$(swift build -c "$CONFIG" --product SaplingMenuBar --show-bin-path)/SaplingMenuBar"
-VERSION="$(grep -o 'current = "[^"]*"' Sources/SaplingCore/DTOs.swift | head -1 | cut -d'"' -f2)"
+# Located rather than hardcoded, so moving the file doesn't silently produce
+# a bundle with an empty version string.
+VERSION_FILE="$(grep -rl 'enum SaplingVersion' Sources --include='*.swift' | head -1)"
+VERSION="$(grep -o 'current = "[^"]*"' "$VERSION_FILE" | head -1 | cut -d'"' -f2)"
+if [ -z "$VERSION" ]; then echo "error: could not determine version" >&2; exit 1; fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

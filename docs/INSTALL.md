@@ -122,7 +122,10 @@ sudo sapling install \
 
 A GitHub App is recommended (15,000 req/hr, finer-grained permissions). Create one at **Settings → Developer settings → GitHub Apps → New GitHub App**:
 
-- **Repository permissions:** `Actions: Read & write`, `Administration: Read & write` (needed to register self-hosted runners), `Metadata: Read-only`
+- **Repository permissions:**
+  - `Actions: Read-only` — finding queued jobs. Sapling never cancels, re-runs, or dispatches anything, so it needs no write here.
+  - `Administration: Read & write` — GitHub classifies managing self-hosted runners as repository administration, not Actions. Registering and removing runners both need write.
+  - `Metadata: Read-only` — selected automatically; also how the public-repo warning works.
 - Generate a private key, download the `.pem`, and put it at `~/.sapling/github-app.pem` on the mini (`chmod 600`)
 - Install the App on the repos you want built, and note the **installation ID** from the installation's URL
 
