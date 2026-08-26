@@ -1,0 +1,165 @@
+import Foundation
+
+/// The `[macos]` section: how macOS jobs are run.
+public struct MacOSConfig: Codable, Sendable {
+    /// Apple's virtualization licensing allows at most 2 concurrent macOS VMs per host.
+    ///
+    /// This is a hard ceiling, not a tuning knob (§5.1).
+    public static let appleConcurrencyLimit = 2
+
+    /// Whether this node accepts jobs for this platform.
+    public var enabled: Bool
+    /// Tart image that every job's VM is cloned from.
+    public var baseImage: String
+    /// Requested concurrency.
+    ///
+    /// Read `effectiveMaxConcurrent` instead — this value is advisory and may be clamped.
+    public var maxConcurrent: Int
+    /// Account the agent logs into inside the VM.
+    public var sshUsername: String
+    /// Base image password.
+    ///
+    /// Only used for first-time image preparation; running jobs are reached with a key.
+    public var sshPassword: String
+    /// Runner labels this node offers.
+    ///
+    /// A job is eligible when its labels are a subset of these.
+    public var labels: [String]
+    /// How long to wait for a VM to boot and accept SSH.
+    public var bootTimeoutSeconds: Int
+    /// How long a single job may run before it is terminated.
+    public var jobTimeoutSeconds: Int
+    /// CPU cores per environment. `nil` uses the tool's default.
+    public var cpuCount: Int?
+    /// Memory per environment in GB. `nil` uses the tool's default.
+    public var memoryGB: Int?
+
+    /// `maxConcurrent` clamped to Apple's limit.
+    ///
+    /// Always use this, never the raw config value.
+    public var effectiveMaxConcurrent: Int {
+        guard enabled else { return 0 }
+        return min(max(0, maxConcurrent), Self.appleConcurrencyLimit)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, labels
+        case baseImage = "base_image"
+        case maxConcurrent = "max_concurrent"
+        case sshUsername = "ssh_username"
+        case sshPassword = "ssh_password"
+        case bootTimeoutSeconds = "boot_timeout_seconds"
+        case jobTimeoutSeconds = "job_timeout_seconds"
+        case cpuCount = "cpu_count"
+        case memoryGB = "memory_gb"
+    }
+
+    /// Creates a platform configuration.
+    public init(
+        enabled: Bool = true,
+        baseImage: String = "sapling-macos-base",
+        maxConcurrent: Int = 2,
+        sshUsername: String = "admin",
+        sshPassword: String = "admin",
+        labels: [String] = ["self-hosted", "macos", "arm64"],
+        bootTimeoutSeconds: Int = 300,
+        jobTimeoutSeconds: Int = 7200,
+        cpuCount: Int? = nil,
+        memoryGB: Int? = nil
+    ) {
+        self.enabled = enabled
+        self.baseImage = baseImage
+        self.maxConcurrent = maxConcurrent
+        self.sshUsername = sshUsername
+        self.sshPassword = sshPassword
+        self.labels = labels
+        self.bootTimeoutSeconds = bootTimeoutSeconds
+        self.jobTimeoutSeconds = jobTimeoutSeconds
+        self.cpuCount = cpuCount
+        self.memoryGB = memoryGB
+    }
+
+    /// Creates a platform configuration.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        baseImage = try c.decodeIfPresent(String.self, forKey: .baseImage) ?? "sapling-macos-base"
+        maxConcurrent = try c.decodeIfPresent(Int.self, forKey: .maxConcurrent) ?? 2
+        sshUsername = try c.decodeIfPresent(String.self, forKey: .sshUsername) ?? "admin"
+        sshPassword = try c.decodeIfPresent(String.self, forKey: .sshPassword) ?? "admin"
+        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? ["self-hosted", "macos", "arm64"]
+        bootTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .bootTimeoutSeconds) ?? 300
+        jobTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .jobTimeoutSeconds) ?? 7200
+        cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount)
+        memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
+    }
+}
+
+/// The `[linux]` section: how Linux jobs are run.
+public struct LinuxConfig: Codable, Sendable {
+    /// Whether this node accepts jobs for this platform.
+    public var enabled: Bool
+    /// Container image used when a workflow doesn't name one.
+    public var defaultImage: String
+    /// Requested concurrency.
+    ///
+    /// Read `effectiveMaxConcurrent` instead — this value is advisory and may be clamped.
+    public var maxConcurrent: Int
+    /// Runner labels this node offers.
+    ///
+    /// A job is eligible when its labels are a subset of these.
+    public var labels: [String]
+    /// How long a single job may run before it is terminated.
+    public var jobTimeoutSeconds: Int
+    /// CPU cores per environment. `nil` uses the tool's default.
+    public var cpuCount: Int?
+    /// Memory per environment in GB. `nil` uses the tool's default.
+    public var memoryGB: Int?
+
+    /// Concurrency the scheduler actually uses, after clamping.
+    public var effectiveMaxConcurrent: Int {
+        enabled ? max(0, maxConcurrent) : 0
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, labels
+        case defaultImage = "default_image"
+        case maxConcurrent = "max_concurrent"
+        case jobTimeoutSeconds = "job_timeout_seconds"
+        case cpuCount = "cpu_count"
+        case memoryGB = "memory_gb"
+    }
+
+    /// Creates a platform configuration.
+    public init(
+        enabled: Bool = true,
+        defaultImage: String = "ghcr.io/actions/actions-runner:latest",
+        maxConcurrent: Int = 2,
+        labels: [String] = ["self-hosted", "linux", "arm64"],
+        jobTimeoutSeconds: Int = 7200,
+        cpuCount: Int? = nil,
+        memoryGB: Int? = nil
+    ) {
+        self.enabled = enabled
+        self.defaultImage = defaultImage
+        self.maxConcurrent = maxConcurrent
+        self.labels = labels
+        self.jobTimeoutSeconds = jobTimeoutSeconds
+        self.cpuCount = cpuCount
+        self.memoryGB = memoryGB
+    }
+
+    /// Creates a platform configuration.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        defaultImage =
+            try c.decodeIfPresent(String.self, forKey: .defaultImage)
+            ?? "ghcr.io/actions/actions-runner:latest"
+        maxConcurrent = try c.decodeIfPresent(Int.self, forKey: .maxConcurrent) ?? 2
+        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? ["self-hosted", "linux", "arm64"]
+        jobTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .jobTimeoutSeconds) ?? 7200
+        cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount)
+        memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
+    }
+}

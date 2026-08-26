@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # GitHub-hosted for now. Once the Mac mini is up and Phase 2 of
+    # docs/TESTING.md passes, switch to: [self-hosted, macos, arm64]
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Lint
+        run: ./scripts/lint.sh
+
+      - name: File sizes
+        run: ./scripts/check-file-sizes.sh
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
