@@ -21,12 +21,12 @@ struct ContainerProvider: JobProvider, Sendable {
     func preflight() async throws {
         // The container system is a background service that does not come up
         // on its own after a reboot; starting it is idempotent.
-        let statusCommand = try await ContainerCommand.invocation(["system", "status"])
+        let statusCommand = try await SessionCommand.invocation("container", ["system", "status"])
         let status = try await ProcessRunner.run(
             statusCommand.executable, statusCommand.arguments, timeout: .seconds(30))
         guard !status.succeeded else { return }
 
-        let startCommand = try await ContainerCommand.invocation(["system", "start"])
+        let startCommand = try await SessionCommand.invocation("container", ["system", "start"])
         let start = try await ProcessRunner.run(
             startCommand.executable, startCommand.arguments, timeout: .seconds(120))
         guard start.succeeded else {
@@ -63,7 +63,7 @@ struct ContainerProvider: JobProvider, Sendable {
             args += ["--env", "\(key)=\(value)"]
         }
         args += ["--entrypoint", "/bin/bash", image, "-c", runnerScript(for: request)]
-        let runCommand = try await ContainerCommand.invocation(args)
+        let runCommand = try await SessionCommand.invocation("container", args)
 
         await events.record(RunEventName.containerStarted, detail: "\(name) (\(image))")
 
@@ -127,14 +127,16 @@ struct ContainerProvider: JobProvider, Sendable {
 
     static func forceTeardown(name: String) async {
         for arguments in [["stop", name], ["delete", "--force", name]] {
-            guard let command = try? await ContainerCommand.invocation(arguments) else { return }
+            guard let command = try? await SessionCommand.invocation("container", arguments) else { return }
             _ = try? await ProcessRunner.run(
                 command.executable, command.arguments, timeout: .seconds(60))
         }
     }
 
     func reapOrphans() async -> [String] {
-        guard let command = try? await ContainerCommand.invocation(["list", "--all", "--format", "json"]),
+        guard
+            let command = try? await SessionCommand.invocation(
+                "container", ["list", "--all", "--format", "json"]),
             let result = try? await ProcessRunner.run(command.executable, command.arguments),
             result.succeeded,
             let data = result.stdout.data(using: .utf8),

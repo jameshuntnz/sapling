@@ -27,7 +27,10 @@ public enum VMMaintenance {
         guard includingBaseImage else { return removed }
 
         let base = config.baseImage
-        if let exists = try? await ProcessRunner.run("tart", ["get", base]), exists.succeeded {
+        if let command = try? await TartProvider.tart(["get", base]),
+            let exists = try? await ProcessRunner.run(command.executable, command.arguments),
+            exists.succeeded
+        {
             await TartProvider.forceTeardown(vmName: base)
             removed.append(base)
         }

@@ -91,29 +91,39 @@ struct ProviderTests {
 /// root daemon has to enter that session to reach it.
 ///
 /// These cover how the invocation is built.
-@Suite("Container invocation")
-struct ContainerCommandTests {
-    @Test("runs container directly when not root")
+@Suite("Session invocation")
+struct SessionCommandTests {
+    @Test("runs the tool directly when not root")
     func directWhenUnprivileged() async throws {
-        guard getuid() != 0, ProcessRunner.which("container") != nil else { return }
-        let command = try await ContainerCommand.invocation(["system", "status"])
-        #expect(command.executable.hasSuffix("container"))
-        #expect(command.arguments == ["system", "status"])
+        guard getuid() != 0 else { return }
+        let command = try await SessionCommand.invocation("sh", ["-c", "true"])
+        #expect(command.executable.hasSuffix("sh"))
+        #expect(command.arguments == ["-c", "true"])
     }
 
-    @Test("reports a missing container tool with install guidance")
+    @Test("reports a missing tool with install guidance")
     func missingTool() async {
-        guard ProcessRunner.which("container") == nil else { return }
         await #expect(throws: ProviderError.self) {
-            _ = try await ContainerCommand.invocation(["system", "status"])
+            _ = try await SessionCommand.invocation("definitely-not-a-real-binary-xyz", [])
         }
+    }
+
+    /// Both providers need the console user's session — `container` for its
+    /// apiserver, Virtualization for its keychain — so tart goes through the
+    /// same route, and carries TART_HOME across the sudo boundary.
+    @Test("tart invocations preserve an explicit TART_HOME")
+    func tartCarriesEnvironment() async throws {
+        guard getuid() != 0, ProcessRunner.which("tart") != nil else { return }
+        let command = try await TartProvider.tart(["list"])
+        // Unprivileged, it's a direct call with no env prefix needed.
+        #expect(command.arguments == ["list"])
     }
 
     /// The console user is the session automatic login creates, and the one
     /// that owns the apiserver.
     @Test("resolves a console user that isn't root")
     func sessionUser() async {
-        guard let user = await ContainerCommand.sessionUser() else { return }
+        guard let user = await SessionCommand.sessionUser() else { return }
         #expect(!user.name.isEmpty)
         #expect(user.name != "root")
         #expect(Int(user.uid) != nil)

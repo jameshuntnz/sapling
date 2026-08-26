@@ -1,4 +1,5 @@
 import Foundation
+import SaplingAgent
 import SaplingCore
 
 /// Checks that the base macOS VM image exists.
@@ -14,7 +15,9 @@ public struct BaseImageStep: InstallStep {
         guard ProcessRunner.which("tart") != nil else {
             return .failed("Tart is not installed yet")
         }
-        guard let result = try? await ProcessRunner.run("tart", ["get", imageName], timeout: .seconds(30)),
+        guard let command = try? await TartProvider.tart(["get", imageName]),
+            let result = try? await ProcessRunner.run(
+                command.executable, command.arguments, timeout: .seconds(30)),
             result.succeeded
         else {
             return .manual(

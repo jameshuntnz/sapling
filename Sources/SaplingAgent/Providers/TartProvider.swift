@@ -7,7 +7,7 @@ import SaplingCore
 /// headless, SSH in, run an ephemeral runner, then delete the clone. The VM
 /// *is* the isolation boundary, so teardown is unconditional — nothing is
 /// preserved between jobs by design (§7).
-struct TartProvider: JobProvider, Sendable {
+public struct TartProvider: JobProvider, Sendable {
     let platform: JobPlatform = .macos
 
     let config: MacOSConfig
@@ -45,7 +45,8 @@ struct TartProvider: JobProvider, Sendable {
     }
 
     private func imageExists(_ name: String) async throws -> Bool {
-        let result = try await ProcessRunner.run("tart", ["get", name])
+        let command = try await Self.tart(["get", name])
+        let result = try await ProcessRunner.run(command.executable, command.arguments)
         return result.succeeded
     }
 
@@ -76,7 +77,8 @@ struct TartProvider: JobProvider, Sendable {
         // `tart run` blocks for the VM's lifetime, so it stays a background
         // task and gets cancelled during teardown.
         let bootTask = Task.detached {
-            for try await chunk in ProcessRunner.stream("tart", ["run", "--no-graphics", vmName]) {
+            let command = try await Self.tart(["run", "--no-graphics", vmName])
+            for try await chunk in ProcessRunner.stream(command.executable, command.arguments) {
                 if case .stderr(let text) = chunk, !text.isEmpty {
                     await events.log("tart: \(text)")
                 }
@@ -101,7 +103,8 @@ struct TartProvider: JobProvider, Sendable {
     private func waitForIP(vmName: String, timeout: Duration) async throws -> String {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
-            let result = try await ProcessRunner.run("tart", ["ip", vmName])
+            let command = try await Self.tart(["ip", vmName])
+            let result = try await ProcessRunner.run(command.executable, command.arguments)
             let ip = result.trimmedOutput
             if result.succeeded, !ip.isEmpty {
                 return ip
@@ -231,12 +234,16 @@ struct TartProvider: JobProvider, Sendable {
     /// booted can't be stopped, and one that was never cloned can't be
     /// deleted, but neither should stop us reclaiming the slot.
     static func forceTeardown(vmName: String) async {
-        _ = try? await ProcessRunner.run("tart", ["stop", "--timeout", "30", vmName], timeout: .seconds(60))
-        _ = try? await ProcessRunner.run("tart", ["delete", vmName], timeout: .seconds(60))
+        for arguments in [["stop", "--timeout", "30", vmName], ["delete", vmName]] {
+            guard let command = try? await tart(arguments) else { return }
+            _ = try? await ProcessRunner.run(
+                command.executable, command.arguments, timeout: .seconds(60))
+        }
     }
 
     func reapOrphans() async -> [String] {
-        guard let result = try? await ProcessRunner.run("tart", ["list", "--format", "json"]),
+        guard let command = try? await Self.tart(["list", "--format", "json"]),
+            let result = try? await ProcessRunner.run(command.executable, command.arguments),
             result.succeeded,
             let data = result.stdout.data(using: .utf8),
             let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
@@ -270,4 +277,22 @@ struct TartProvider: JobProvider, Sendable {
 /// Single-quote a value for safe interpolation into a remote shell command.
 func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+extension TartProvider {
+    /// Run `tart` inside the console user's session.
+    ///
+    /// Every invocation goes through here, not just `run`: a clone made by
+    /// root is root-owned, and the user's later `tart run` then fails with
+    /// `utimes(2): Operation not permitted` before Virtualization is even
+    /// reached.
+    public static func tart(_ arguments: [String]) async throws -> (executable: String, arguments: [String]) {
+        var environment: [String: String] = [:]
+        // Carry an explicitly configured image library across the sudo
+        // boundary; otherwise `-H` lets tart find ~/.tart on its own.
+        if let tartHome = ProcessInfo.processInfo.environment["TART_HOME"] {
+            environment["TART_HOME"] = tartHome
+        }
+        return try await SessionCommand.invocation("tart", arguments, environment: environment)
+    }
 }

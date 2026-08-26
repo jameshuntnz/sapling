@@ -43,10 +43,13 @@ public enum SaplingPaths {
     public static let installedBinary = "/usr/local/bin/sapling"
 
     /// Client-side config (CLI and menu bar app talking to a remote daemon).
+    ///
+    /// Derived from `home` like everything else, so `SAPLING_HOME` moves the
+    /// whole of Sapling's state together. In the normal case the two are the
+    /// same path; they diverged only when `SAPLING_HOME` was overridden, which
+    /// made this the one file that ignored it.
     public static var clientConfigFile: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".sapling")
-            .appendingPathComponent("client.toml")
+        home.appendingPathComponent("client.toml")
     }
 
     /// Expands a leading `~` to the current home directory.

@@ -25,7 +25,7 @@ public struct ContainerStep: InstallStep {
         // The timeout matters — a half-torn-down apiserver blocks rather than
         // refusing, which would hang `install` indefinitely.
         var running = false
-        if let command = try? await ContainerCommand.invocation(["system", "status"]),
+        if let command = try? await SessionCommand.invocation("container", ["system", "status"]),
             let status = try? await ProcessRunner.run(
                 command.executable, command.arguments, timeout: .seconds(20))
         {
@@ -40,7 +40,7 @@ public struct ContainerStep: InstallStep {
     /// Installs or configures Apple's `container` tool and its background service.
     public func fix() async throws -> String {
         if ProcessRunner.which("container") != nil {
-            let command = try await ContainerCommand.invocation(["system", "start"])
+            let command = try await SessionCommand.invocation("container", ["system", "start"])
             let start = try await ProcessRunner.run(
                 command.executable, command.arguments, timeout: .seconds(180))
             guard start.succeeded else {
@@ -62,7 +62,7 @@ public struct ContainerStep: InstallStep {
             let install = try await ProcessRunner.run(
                 HomebrewStep.brewPath, ["install", "container"], timeout: .seconds(1800))
             if install.succeeded {
-                if let start = try? await ContainerCommand.invocation(["system", "start"]) {
+                if let start = try? await SessionCommand.invocation("container", ["system", "start"]) {
                     _ = try? await ProcessRunner.run(
                         start.executable, start.arguments, timeout: .seconds(180))
                 }
