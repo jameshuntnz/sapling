@@ -92,7 +92,25 @@ public struct NetworkGuard: Sendable {
 
             """
 
+        // Reloading an anchor whose tables are still referenced fails with
+        // "cannot define table ...: Resource busy". Since the filter is
+        // re-asserted before every job, that is the common case rather than an
+        // edge one — and because a job refuses to start when the filter can't
+        // be applied, a redundant reload failing would stop the node working
+        // entirely. So: if what we would write is already loaded, do nothing.
+        let existing = try? String(contentsOfFile: Self.anchorPath, encoding: .utf8)
+        if existing == rules, await Self.verify().loaded {
+            return Applied(
+                jobSubnets: jobSubnets, gateways: gateways, blocked: blocked, allowed: allowed)
+        }
+
         try rules.write(toFile: Self.anchorPath, atomically: true, encoding: .utf8)
+
+        // The rules genuinely changed, so the old ones have to go first for the
+        // same reason. This leaves a brief unfiltered window, which is why it
+        // only happens when something actually changed.
+        _ = try? await ProcessRunner.run(
+            "pfctl", ["-a", Self.anchorName, "-F", "all"], timeout: .seconds(20))
 
         // pf may be disabled entirely on a fresh machine; -E enables it and
         // bumps a reference count, which is safe to call repeatedly.

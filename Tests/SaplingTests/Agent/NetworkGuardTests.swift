@@ -62,3 +62,55 @@ struct NetworkGuardEnforcementTests {
         #expect(config.allowedCIDRs.contains("192.168.64.1/32"))
     }
 }
+
+/// Re-asserting the filter before every job means the "nothing changed" path is the common one, not an edge
+/// case.
+///
+/// Getting it wrong stopped the node working entirely: reloading an anchor whose tables are still referenced
+/// fails with "Resource busy", and a job refuses to start when the filter can't be applied — so every job
+/// after the first was declined.
+@Suite("Egress filter reloading")
+struct NetworkGuardReloadTests {
+    @Test("requires root before touching pf at all")
+    func requiresRootFirst() async {
+        guard getuid() != 0 else { return }
+        var config = NetworkConfig()
+        config.jobSubnets = ["192.168.64.0/24"]
+
+        do {
+            _ = try await NetworkGuard(config: config).apply()
+            Issue.record("applying pf rules without root should fail")
+        } catch let error as NetworkGuardError {
+            guard case .notRoot = error else {
+                Issue.record("expected .notRoot, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+    }
+
+    /// The declared subnets are what make the filter applicable before any
+    /// bridge exists, so an empty list has to be refused rather than silently
+    /// producing rules that match nothing.
+    @Test("refuses to build rules with no subnets to protect")
+    func refusesEmptySubnets() async {
+        guard getuid() != 0 else { return }
+        var config = NetworkConfig()
+        config.jobSubnets = []
+        await #expect(throws: NetworkGuardError.self) {
+            _ = try await NetworkGuard(config: config).apply()
+        }
+    }
+
+    /// Each declared subnet needs its own gateway in the allowed table, or the
+    /// environment on it loses DHCP, DNS and the cache proxy.
+    @Test("derives a gateway for every declared subnet")
+    func gatewayPerSubnet() {
+        let subnets = NetworkConfig().jobSubnets
+        let gateways = subnets.compactMap(NetworkGuard.gatewayCIDR(forSubnet:))
+        #expect(gateways.count == subnets.count)
+        #expect(gateways.contains("192.168.64.1/32"))
+        #expect(gateways.contains("192.168.65.1/32"))
+    }
+}
