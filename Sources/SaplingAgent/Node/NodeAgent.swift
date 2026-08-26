@@ -27,6 +27,13 @@ public actor NodeAgent {
     /// retries at a sane rate rather than every poll cycle.
     static let requeueCooldown: TimeInterval = 120
 
+    /// How many times to ask GitHub for a job's conclusion before concluding it never finished.
+    ///
+    /// GitHub records the result a moment after the runner exits, so a single immediate check races that.
+    static let conclusionAttempts = 5
+    /// Gap between those attempts.
+    static let conclusionRetryDelay: Duration = .seconds(3)
+
     var pollTask: Task<Void, Never>?
     var housekeepingTask: Task<Void, Never>?
     var runningJobs: [String: Task<Void, Never>] = [:]

@@ -84,23 +84,24 @@ extension NodeAgent {
     /// exit code therefore tells us the runner finished, not whether *this*
     /// job passed — GitHub is the authority on that.
     func finalize(job: Job, outcome: JobOutcome, events: any EventSink) async {
-        var status: JobStatus = outcome.succeeded ? .completed : .failed
-        var reason = outcome.message
+        let status: JobStatus
+        let reason: String?
 
-        if let jobID = Int64(job.id),
-            let remote = try? await github.job(repo: job.repo, jobID: jobID),
-            remote.isCompleted
-        {
-            switch remote.conclusion {
-            case "success":
-                status = .completed
-                reason = nil
-            case let conclusion?:
-                status = .failed
-                reason = "GitHub reported conclusion: \(conclusion)"
-            case nil:
-                break
-            }
+        // A clean exit is not evidence the job ran. A runner that refuses to
+        // work — a deprecated version, say — exits 0 having done nothing, and
+        // trusting that reported success for work that never happened.
+        switch await remoteConclusion(for: job) {
+        case .success:
+            status = .completed
+            reason = nil
+        case .failure(let conclusion):
+            status = .failed
+            reason = "GitHub reported conclusion: \(conclusion)"
+        case .notFinished:
+            status = .failed
+            reason =
+                outcome.message.map { "runner exited without the job completing: \($0)" }
+                ?? "runner exited without the job completing"
         }
 
         await events.record(
@@ -140,5 +141,51 @@ extension NodeAgent {
     func cacheGatewayHint() async -> String? {
         let interfaces = try? await NetworkGuard.discoverBridgeInterfaces()
         return interfaces?.first?.address
+    }
+}
+
+extension NodeAgent {
+    /// What GitHub says became of a job.
+    enum RemoteConclusion {
+        case success
+        case failure(String)
+        /// GitHub has no result: the job did not run to completion here.
+        case notFinished
+    }
+
+    /// Ask GitHub how the job ended, allowing for its result lagging slightly
+    /// behind the runner exiting.
+    ///
+    /// GitHub is the authority for two separate reasons. A JIT runner picks up
+    /// whichever queued job matches its labels, not necessarily the one that
+    /// prompted the launch — so the exit code describes the runner, not this
+    /// job. And a runner can exit cleanly without doing any work at all, which
+    /// an exit code cannot distinguish from success.
+    /// - Parameters:
+    ///   - job: The job to ask about.
+    ///   - attempts: How many times to ask before giving up.
+    ///   - retryDelay: Gap between attempts.
+    /// - Returns: What GitHub says became of the job.
+    func remoteConclusion(
+        for job: Job,
+        attempts: Int = NodeAgent.conclusionAttempts,
+        retryDelay: Duration = NodeAgent.conclusionRetryDelay
+    ) async -> RemoteConclusion {
+        guard let jobID = Int64(job.id) else { return .notFinished }
+
+        for attempt in 0..<attempts {
+            if attempt > 0 {
+                try? await Task.sleep(for: retryDelay)
+            }
+            guard let remote = try? await github.job(repo: job.repo, jobID: jobID) else { continue }
+            guard remote.isCompleted else { continue }
+
+            switch remote.conclusion {
+            case "success": return .success
+            case let conclusion?: return .failure(conclusion)
+            case nil: return .notFinished
+            }
+        }
+        return .notFinished
     }
 }

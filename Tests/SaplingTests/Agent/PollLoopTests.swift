@@ -119,3 +119,77 @@ struct PollLoopTests {
         }
     }
 }
+
+/// A runner exiting cleanly is not evidence the job ran.
+///
+/// A deprecated runner exits 0 having refused to work, and reporting that as success is the worst failure
+/// available: the build looks green and nothing was built.
+@Suite("Job conclusion", .serialized)
+struct JobConclusionTests {
+    static let port = 18805
+
+    func withFakeGitHub<T>(_ body: (NodeAgent) async throws -> T) async throws -> T {
+        var fixtures = FakeGitHubFixtures()
+        fixtures.queuedRunIDs = [100]
+        fixtures.jobsByRun = [100: FakeGitHubFixtureLibrary.threePlatforms]
+        let server = try await FakeGitHubServer.start(port: Self.port, fixtures: fixtures)
+
+        var config = SaplingConfig()
+        config.node.name = "mini"
+        config.github = server.githubConfig()
+
+        let store = try SaplingStore(inMemoryNamed: UUID().uuidString)
+        let agent = NodeAgent(config: config, store: store)
+        do {
+            let result = try await body(agent)
+            await server.shutdown()
+            return result
+        } catch {
+            await server.shutdown()
+            throw error
+        }
+    }
+
+    /// Job 9001 is reported completed/success by the fake API.
+    @Test("reports success when GitHub agrees the job succeeded")
+    func successWhenGitHubAgrees() async throws {
+        try await withFakeGitHub { agent in
+            let job = Job(
+                id: "9001", repo: "acme/widgets", platform: .macos, labels: [], status: .running)
+            guard case .success = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
+            else {
+                Issue.record("expected .success")
+                return
+            }
+        }
+    }
+
+    /// Job 424242 is unknown to the fake API — the same shape as a job GitHub
+    /// still has queued because the runner never picked it up.
+    @Test("reports notFinished when GitHub has no result")
+    func notFinishedWhenGitHubHasNoResult() async throws {
+        try await withFakeGitHub { agent in
+            let job = Job(
+                id: "424242", repo: "acme/widgets", platform: .macos, labels: [], status: .running)
+            guard case .notFinished = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
+            else {
+                Issue.record("a job GitHub has no result for must not read as finished")
+                return
+            }
+        }
+    }
+
+    @Test("a non-numeric job id can never read as success")
+    func rejectsUnusableID() async throws {
+        try await withFakeGitHub { agent in
+            let job = Job(
+                id: "not-a-number", repo: "acme/widgets", platform: .macos, labels: [],
+                status: .running)
+            guard case .notFinished = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
+            else {
+                Issue.record("expected .notFinished")
+                return
+            }
+        }
+    }
+}
