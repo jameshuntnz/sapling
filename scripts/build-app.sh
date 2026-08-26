@@ -49,6 +49,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <!-- Menu bar only: no Dock icon, no main menu. -->
     <key>LSUIElement</key>
     <true/>
+    <!--
+      The control plane serves plain HTTP, bound to the Tailscale interface.
+      Transport encryption is WireGuard's job, one layer down, and the API is
+      unreachable off the tailnet — so TLS here would be a self-signed
+      certificate protecting an already-encrypted tunnel.
+
+      App Transport Security blocks cleartext for bundled apps regardless, and
+      the daemon's address is configured by the user at runtime, so a domain
+      exception cannot be declared ahead of time. Hence a blanket allowance.
+
+      This is why `sapling status` worked while the app could not connect: a
+      bare executable is not subject to ATS, an app bundle is.
+    -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

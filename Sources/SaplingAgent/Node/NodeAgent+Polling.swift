@@ -46,6 +46,12 @@ extension NodeAgent {
                 )
                 if try await store.insertJobIfNew(record) {
                     Log.info("queued \(repo) #\(job.id) \"\(job.name)\" (\(platform.rawValue))")
+                } else if try await store.requeueJob(
+                    id: record.id, failedBefore: Date().addingTimeInterval(-Self.requeueCooldown))
+                {
+                    // GitHub still wants it run, so a local failure shouldn't
+                    // strand it until GitHub's own timeout hours from now.
+                    Log.info("re-queued \(repo) #\(job.id) after a local failure")
                 }
             }
         }

@@ -155,3 +155,87 @@ struct StoreTests {
         #expect(try await store.state(SaplingStore.StateKey.lastPollError) == nil)
     }
 }
+
+/// A job that failed on this node but is still queued on GitHub must be offered again.
+///
+/// Discovery skips ids it has already seen, so without this a transient VM failure strands the job until
+/// GitHub's own timeout.
+@Suite("Requeueing after local failure")
+struct RequeueTests {
+    func makeStore() async throws -> SaplingStore {
+        let store = try SaplingStore(inMemoryNamed: UUID().uuidString)
+        try await store.upsertNode(
+            Node(id: "mini", name: "mini", platform: "darwin/arm64", lastSeenAt: nil, status: .online))
+        return store
+    }
+
+    func failedJob(_ id: String, completedAt: Date) -> Job {
+        Job(
+            id: id, nodeID: "mini", repo: "acme/widgets", platform: .macos,
+            labels: ["self-hosted", "macos"], status: .failed, name: "build",
+            queuedAt: completedAt.addingTimeInterval(-300),
+            startedAt: completedAt.addingTimeInterval(-290),
+            completedAt: completedAt, exitReason: "VM never booted")
+    }
+
+    @Test("requeues a failed job and clears its failure state")
+    func requeuesFailedJob() async throws {
+        let store = try await makeStore()
+        try await store.saveJob(failedJob("1", completedAt: Date().addingTimeInterval(-600)))
+
+        let requeued = try await store.requeueJob(id: "1", failedBefore: Date())
+        #expect(requeued)
+
+        let job = try #require(try await store.job(id: "1"))
+        #expect(job.status == .queued)
+        // Stale timing and a stale reason would misreport the retry.
+        #expect(job.startedAt == nil)
+        #expect(job.completedAt == nil)
+        #expect(job.exitReason == nil)
+    }
+
+    /// Without a cooldown, a job that fails instantly respins every cycle.
+    @Test("leaves a just-failed job alone until the cooldown passes")
+    func respectsCooldown() async throws {
+        let store = try await makeStore()
+        try await store.saveJob(failedJob("1", completedAt: Date()))
+
+        let tooSoon = try await store.requeueJob(
+            id: "1", failedBefore: Date().addingTimeInterval(-120))
+        #expect(!tooSoon)
+        #expect(try await store.job(id: "1")?.status == .failed)
+    }
+
+    /// Requeueing a job that's mid-flight would double-run it.
+    @Test("never disturbs a job that is still running")
+    func ignoresActiveJobs() async throws {
+        let store = try await makeStore()
+        for status in JobStatus.allCases where status.occupiesSlot {
+            let id = status.rawValue
+            try await store.saveJob(
+                Job(
+                    id: id, nodeID: "mini", repo: "acme/widgets", platform: .linux,
+                    labels: [], status: status))
+            #expect(try await store.requeueJob(id: id, failedBefore: Date()) == false)
+            #expect(try await store.job(id: id)?.status == status)
+        }
+    }
+
+    @Test("ignores a job it has never seen")
+    func ignoresUnknownJob() async throws {
+        let store = try await makeStore()
+        #expect(try await store.requeueJob(id: "nope", failedBefore: Date()) == false)
+    }
+
+    /// A completed job is terminal too, but GitHub would not still be
+    /// reporting it queued — and if it did, rerunning is the right answer.
+    @Test("requeues a completed job as readily as a failed one")
+    func requeuesCompleted() async throws {
+        let store = try await makeStore()
+        var job = failedJob("1", completedAt: Date().addingTimeInterval(-600))
+        job.status = .completed
+        job.exitReason = nil
+        try await store.saveJob(job)
+        #expect(try await store.requeueJob(id: "1", failedBefore: Date()))
+    }
+}

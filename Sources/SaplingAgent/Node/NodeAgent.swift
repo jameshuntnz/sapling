@@ -21,6 +21,12 @@ public actor NodeAgent {
     /// Sapling's runners from any others in the repo.
     public static let runnerNamePrefix = "sap-"
 
+    /// How long to leave a locally failed job alone before offering it again.
+    ///
+    /// Long enough that a job failing immediately — a missing base image, say —
+    /// retries at a sane rate rather than every poll cycle.
+    static let requeueCooldown: TimeInterval = 120
+
     var pollTask: Task<Void, Never>?
     var housekeepingTask: Task<Void, Never>?
     var runningJobs: [String: Task<Void, Never>] = [:]
