@@ -20,6 +20,7 @@ public struct Installer: Sendable {
         let config = SaplingConfig.loadOrDefault()
         return [
             PlatformStep(),
+            DiskStep(),
             HomebrewStep(interactive: !options.nonInteractive),
             TartStep(),
             ContainerStep(),
