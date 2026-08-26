@@ -21,6 +21,7 @@ public struct Installer: Sendable {
         return [
             PlatformStep(),
             DiskStep(),
+            CapacityStep(config: config),
             HomebrewStep(interactive: !options.nonInteractive),
             TartStep(),
             ContainerStep(),
