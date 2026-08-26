@@ -86,3 +86,36 @@ struct ProviderTests {
         #expect(ContainerProvider(config: LinuxConfig()).platform == .linux)
     }
 }
+
+/// Apple's `container` keeps per-user state and runs its apiserver in the user's GUI launchd domain, so a
+/// root daemon has to enter that session to reach it.
+///
+/// These cover how the invocation is built.
+@Suite("Container invocation")
+struct ContainerCommandTests {
+    @Test("runs container directly when not root")
+    func directWhenUnprivileged() async throws {
+        guard getuid() != 0, ProcessRunner.which("container") != nil else { return }
+        let command = try await ContainerCommand.invocation(["system", "status"])
+        #expect(command.executable.hasSuffix("container"))
+        #expect(command.arguments == ["system", "status"])
+    }
+
+    @Test("reports a missing container tool with install guidance")
+    func missingTool() async {
+        guard ProcessRunner.which("container") == nil else { return }
+        await #expect(throws: ProviderError.self) {
+            _ = try await ContainerCommand.invocation(["system", "status"])
+        }
+    }
+
+    /// The console user is the session automatic login creates, and the one
+    /// that owns the apiserver.
+    @Test("resolves a console user that isn't root")
+    func sessionUser() async {
+        guard let user = await ContainerCommand.sessionUser() else { return }
+        #expect(!user.name.isEmpty)
+        #expect(user.name != "root")
+        #expect(Int(user.uid) != nil)
+    }
+}

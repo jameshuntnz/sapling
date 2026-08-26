@@ -19,21 +19,18 @@ struct ContainerProvider: JobProvider, Sendable {
     }
 
     func preflight() async throws {
-        guard ProcessRunner.which("container") != nil else {
-            throw ProviderError(
-                """
-                Apple's `container` tool is not installed. Run `sapling doctor` for the current \
-                install instructions — see docs/INSTALL.md.
-                """)
-        }
         // The container system is a background service that does not come up
         // on its own after a reboot; starting it is idempotent.
-        let status = try await ProcessRunner.run("container", ["system", "status"], timeout: .seconds(30))
-        if !status.succeeded {
-            let start = try await ProcessRunner.run("container", ["system", "start"], timeout: .seconds(120))
-            guard start.succeeded else {
-                throw ProviderError("`container system start` failed: \(start.stderr)")
-            }
+        let statusCommand = try await ContainerCommand.invocation(["system", "status"])
+        let status = try await ProcessRunner.run(
+            statusCommand.executable, statusCommand.arguments, timeout: .seconds(30))
+        guard !status.succeeded else { return }
+
+        let startCommand = try await ContainerCommand.invocation(["system", "start"])
+        let start = try await ProcessRunner.run(
+            startCommand.executable, startCommand.arguments, timeout: .seconds(120))
+        guard start.succeeded else {
+            throw ProviderError("`container system start` failed: \(start.stderr)")
         }
     }
 
@@ -66,14 +63,16 @@ struct ContainerProvider: JobProvider, Sendable {
             args += ["--env", "\(key)=\(value)"]
         }
         args += ["--entrypoint", "/bin/bash", image, "-c", runnerScript(for: request)]
-        let runArgs = args
+        let runCommand = try await ContainerCommand.invocation(args)
 
         await events.record(RunEventName.containerStarted, detail: "\(name) (\(image))")
 
         let exitCode = try await withThrowingTaskGroup(of: Int32?.self) { group in
             group.addTask {
                 var status: Int32 = -1
-                for try await chunk in ProcessRunner.stream("container", runArgs) {
+                for try await chunk in ProcessRunner.stream(
+                    runCommand.executable, runCommand.arguments
+                ) {
                     switch chunk {
                     case .stdout(let text), .stderr(let text):
                         await events.log(text)
@@ -127,12 +126,16 @@ struct ContainerProvider: JobProvider, Sendable {
     }
 
     static func forceTeardown(name: String) async {
-        _ = try? await ProcessRunner.run("container", ["stop", name], timeout: .seconds(60))
-        _ = try? await ProcessRunner.run("container", ["delete", "--force", name], timeout: .seconds(60))
+        for arguments in [["stop", name], ["delete", "--force", name]] {
+            guard let command = try? await ContainerCommand.invocation(arguments) else { return }
+            _ = try? await ProcessRunner.run(
+                command.executable, command.arguments, timeout: .seconds(60))
+        }
     }
 
     func reapOrphans() async -> [String] {
-        guard let result = try? await ProcessRunner.run("container", ["list", "--all", "--format", "json"]),
+        guard let command = try? await ContainerCommand.invocation(["list", "--all", "--format", "json"]),
+            let result = try? await ProcessRunner.run(command.executable, command.arguments),
             result.succeeded,
             let data = result.stdout.data(using: .utf8),
             let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]

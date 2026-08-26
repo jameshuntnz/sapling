@@ -25,9 +25,11 @@ Enable Remote Login and Screen Sharing:
 
 **System Settings → General → Sharing** → turn on **Remote Login** and **Screen Sharing**.
 
-Enable automatic login (so a reboot brings the machine fully back without someone typing a password at a monitor you don't have):
+Enable automatic login:
 
 **System Settings → Users & Groups → Automatically log in as** → `admin`.
+
+This is **required, not a convenience**, for two separate reasons. A reboot has to bring the machine fully back without someone typing a password at a monitor you don't have — and Apple's `container` runs its apiserver in the console user's GUI launchd domain, so Linux jobs simply cannot run when nobody is logged in. Without automatic login, a reboot leaves you with a node that accepts macOS jobs and fails every Linux one.
 
 > Automatic login means the disk is effectively unlocked at boot. That's the right trade for a headless build box on a network you control, and the wrong one for a laptop.
 

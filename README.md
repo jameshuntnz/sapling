@@ -198,6 +198,7 @@ Three more decisions came up during implementation and are documented where they
 - **JIT runner config over registration tokens.** The runner arrives already configured, runs one job, removes itself. One consequence: a JIT runner picks up *whichever* queued job matches its labels, not necessarily the one that prompted the launch — so job outcomes are reconciled against the GitHub API rather than inferred from the runner's exit code.
 - **Key-based SSH into macOS VMs**, not the base image's password. Adds one line to base-image prep; means a leaked image password isn't enough to reach a running build.
 - **The daemon runs as root** so it can manage the pf anchor, with `TART_HOME` pointed at your user's image library. `sapling install --run-as <user>` exists if Virtualization.framework turns out to be unhappy in the system launchd domain — see [docs/INSTALL.md](docs/INSTALL.md#if-vms-fail-to-start-under-the-launchdaemon).
+- **Linux jobs need a login session on the node.** Apple's `container` stores state under the user's home and runs its apiserver in that user's GUI launchd domain, so root cannot talk to it directly — it returns `XPC connection error: Connection invalid`. Sapling reaches it with `launchctl asuser`, which requires a console user to be logged in. This is why the node is set up with automatic login, and it is a property of Apple's tool rather than a choice Sapling makes. §10 of the design doc assumed the daemon could be wholly independent of a GUI session; with `container` in the stack, it cannot be.
 
 ---
 
