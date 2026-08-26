@@ -119,3 +119,50 @@ struct ContainerCommandTests {
         #expect(Int(user.uid) != nil)
     }
 }
+
+/// Regression cover for the worst bug this project has had: the daemon deleting its own base image on every
+/// start, because the ephemeral-VM prefix also matched `sapling-macos-base`.
+///
+/// Rebuilding that image is an 80GB download, and the deletion was silent.
+@Suite("Orphan VM reaping")
+struct OrphanReapingTests {
+    func entries(_ names: [String]) -> [[String: Any]] {
+        names.map { ["Name": $0] }
+    }
+
+    @Test("never reaps the configured base image")
+    func protectsBaseImage() {
+        let listed = entries(["sapling-macos-base", "sapling-job-abc123", "my-own-vm"])
+        let reapable = TartProvider.reapableVMNames(from: listed, protecting: "sapling-macos-base")
+        #expect(reapable == ["sapling-job-abc123"])
+    }
+
+    /// The prefix alone must not match the conventional base image name — the
+    /// name guard is a second line of defence, not the only one.
+    @Test("ephemeral prefix does not match the base image name")
+    func prefixIsNarrowEnough() {
+        #expect(!"sapling-macos-base".hasPrefix(TartProvider.vmPrefix))
+        #expect("sapling-job-abc123".hasPrefix(TartProvider.vmPrefix))
+    }
+
+    @Test("protects a base image under a non-default name")
+    func protectsRenamedBaseImage() {
+        // Someone could name their base image into the ephemeral namespace.
+        let listed = entries(["sapling-job-custom-base", "sapling-job-abc123"])
+        let reapable = TartProvider.reapableVMNames(from: listed, protecting: "sapling-job-custom-base")
+        #expect(reapable == ["sapling-job-abc123"])
+    }
+
+    @Test("leaves VMs it didn't create alone")
+    func leavesForeignVMsAlone() {
+        let listed = entries(["ventura-work", "my-ci-runner", "sapling"])
+        #expect(TartProvider.reapableVMNames(from: listed, protecting: "sapling-macos-base").isEmpty)
+    }
+
+    @Test("tolerates either key casing tart uses")
+    func handlesKeyCasing() {
+        let listed: [[String: Any]] = [["name": "sapling-job-lower"], ["Name": "sapling-job-upper"]]
+        let reapable = TartProvider.reapableVMNames(from: listed, protecting: "sapling-macos-base")
+        #expect(Set(reapable) == ["sapling-job-lower", "sapling-job-upper"])
+    }
+}

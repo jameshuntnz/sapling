@@ -164,7 +164,8 @@ public struct Installer: Sendable {
             try? FileManager.default.removeItem(atPath: InstallContext.saplingHome)
             actions.append("removed \(InstallContext.saplingHome)")
 
-            let reaped = await VMMaintenance.removeSaplingVMs(config: SaplingConfig.loadOrDefault().macos)
+            let reaped = await VMMaintenance.removeSaplingVMs(
+                config: SaplingConfig.loadOrDefault().macos, includingBaseImage: true)
             if !reaped.isEmpty {
                 actions.append("deleted \(reaped.count) sapling VM(s)")
             }

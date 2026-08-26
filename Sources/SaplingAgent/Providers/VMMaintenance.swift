@@ -11,8 +11,26 @@ public enum VMMaintenance {
     ///
     /// Safe to call when Tart isn't installed: there is nothing to remove in
     /// that case, and it reports an empty list rather than failing.
-    public static func removeSaplingVMs(config: MacOSConfig) async -> [String] {
+    ///
+    /// - Parameters:
+    ///   - config: Supplies the base image name.
+    ///   - includingBaseImage: Also delete the base image. Only `uninstall
+    ///     --purge` should pass true — the running daemon must never remove
+    ///     the image every macOS job is cloned from.
+    /// - Returns: The names of the VMs removed.
+    public static func removeSaplingVMs(
+        config: MacOSConfig,
+        includingBaseImage: Bool = false
+    ) async -> [String] {
         guard ProcessRunner.which("tart") != nil else { return [] }
-        return await TartProvider(config: config).reapOrphans()
+        var removed = await TartProvider(config: config).reapOrphans()
+        guard includingBaseImage else { return removed }
+
+        let base = config.baseImage
+        if let exists = try? await ProcessRunner.run("tart", ["get", base]), exists.succeeded {
+            await TartProvider.forceTeardown(vmName: base)
+            removed.append(base)
+        }
+        return removed
     }
 }

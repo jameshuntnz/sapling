@@ -13,14 +13,14 @@ import SaplingCore
 /// This means the Linux provider depends on a login session existing, which is
 /// why the node is set up with automatic login. It is a property of Apple's
 /// tool, not a choice Sapling makes.
-enum ContainerCommand {
+public enum ContainerCommand {
     /// The user whose session owns the container apiserver.
     ///
     /// The console user, since that is the session automatic login creates.
     /// Resolved per call rather than cached: it costs a couple of milliseconds
     /// against a container operation measured in seconds, and a stale answer
     /// after a re-login would be far more annoying than the lookup.
-    static func sessionUser() async -> (name: String, uid: String)? {
+    public static func sessionUser() async -> (name: String, uid: String)? {
         guard
             let console = try? await ProcessRunner.run("stat", ["-f", "%Su", "/dev/console"]),
             console.succeeded
@@ -40,7 +40,13 @@ enum ContainerCommand {
     ///
     /// Running as the session user already, this is just `container`. Running
     /// as root, it routes through that user's launchd domain instead.
-    static func invocation(_ arguments: [String]) async throws -> (executable: String, arguments: [String]) {
+    /// - Parameter arguments: Arguments to pass to `container`.
+    /// - Returns: The executable and arguments to run.
+    /// - Throws: `ProviderError` if `container` is absent, or if running as
+    ///   root with no console user whose session could be entered.
+    public static func invocation(_ arguments: [String]) async throws
+        -> (executable: String, arguments: [String])
+    {
         guard let containerPath = ProcessRunner.which("container") else {
             throw ProviderError(
                 """

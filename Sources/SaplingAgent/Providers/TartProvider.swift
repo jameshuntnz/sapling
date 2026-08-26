@@ -12,9 +12,14 @@ struct TartProvider: JobProvider, Sendable {
 
     let config: MacOSConfig
     let sshKeyPath: String
-    /// Prefix every VM name gets, so orphan reaping can tell ours from a VM
-    /// the user created by hand.
-    static let vmPrefix = "sapling-"
+    /// Prefix every *ephemeral job* VM gets.
+    ///
+    /// Deliberately narrower than "sapling-": the base image is conventionally
+    /// called `sapling-macos-base`, and a prefix that also matched it meant
+    /// orphan reaping deleted the base image on every daemon start. Reaping
+    /// additionally refuses to touch the configured base image by name, so a
+    /// non-default name can't reintroduce the same failure.
+    static let vmPrefix = "sapling-job-"
 
     init(config: MacOSConfig, sshKeyPath: String = SaplingPaths.sshKeyFile.path) {
         self.config = config
@@ -239,14 +244,26 @@ struct TartProvider: JobProvider, Sendable {
             return []
         }
         var reaped: [String] = []
-        for entry in entries {
-            guard let name = entry["Name"] as? String ?? entry["name"] as? String,
-                name.hasPrefix(Self.vmPrefix)
-            else { continue }
+        for name in Self.reapableVMNames(from: entries, protecting: config.baseImage) {
             await Self.forceTeardown(vmName: name)
             reaped.append(name)
         }
         return reaped
+    }
+
+    /// Which listed VMs are leaked job clones safe to delete.
+    ///
+    /// Split out from the `tart` call so the filtering can be tested: getting
+    /// this wrong destroyed an 80GB base image that takes an hour to rebuild.
+    static func reapableVMNames(from entries: [[String: Any]], protecting baseImage: String) -> [String] {
+        entries.compactMap { entry in
+            guard let name = entry["Name"] as? String ?? entry["name"] as? String else { return nil }
+            guard name.hasPrefix(vmPrefix) else { return nil }
+            // Belt and braces: never delete the image every job is cloned from,
+            // whatever it happens to be called.
+            guard name != baseImage else { return nil }
+            return name
+        }
     }
 }
 

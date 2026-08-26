@@ -1,4 +1,5 @@
 import Foundation
+import SaplingAgent
 import SaplingCore
 
 /// Checks that Apple's `container` tool is installed and running.
@@ -19,8 +20,18 @@ public struct ContainerStep: InstallStep {
         guard let path = ProcessRunner.which("container") else {
             return .fixable("`container` not on PATH")
         }
-        let status = try? await ProcessRunner.run("container", ["system", "status"], timeout: .seconds(30))
-        if status?.succeeded == true {
+        // Via ContainerCommand: under `sudo` this runs as root, and root
+        // cannot reach the apiserver in the console user's session directly.
+        // The timeout matters — a half-torn-down apiserver blocks rather than
+        // refusing, which would hang `install` indefinitely.
+        var running = false
+        if let command = try? await ContainerCommand.invocation(["system", "status"]),
+            let status = try? await ProcessRunner.run(
+                command.executable, command.arguments, timeout: .seconds(20))
+        {
+            running = status.succeeded
+        }
+        if running {
             return .ok("`container` at \(path), system running")
         }
         return .fixable("`container` at \(path), but the container system is not running")
@@ -29,7 +40,9 @@ public struct ContainerStep: InstallStep {
     /// Installs or configures Apple's `container` tool and its background service.
     public func fix() async throws -> String {
         if ProcessRunner.which("container") != nil {
-            let start = try await ProcessRunner.run("container", ["system", "start"], timeout: .seconds(180))
+            let command = try await ContainerCommand.invocation(["system", "start"])
+            let start = try await ProcessRunner.run(
+                command.executable, command.arguments, timeout: .seconds(180))
             guard start.succeeded else {
                 throw InstallError("`container system start` failed: \(start.stderr)")
             }
@@ -38,21 +51,24 @@ public struct ContainerStep: InstallStep {
 
         // Ask Homebrew whether it currently carries it, instead of baking in
         // a command that may be wrong by the time this runs.
+        // A formula in homebrew-core, not a cask — searching casks finds only
+        // the unrelated `container-ps` and sends people to the manual route.
         let search = try? await ProcessRunner.run(
-            HomebrewStep.brewPath, ["search", "--cask", "container"], timeout: .seconds(120))
-        if let search, search.succeeded, search.stdout.split(separator: "\n").contains("container") {
+            HomebrewStep.brewPath, ["search", "--formula", "/^container$/"], timeout: .seconds(120))
+        if let search, search.succeeded,
+            search.stdout.split(separator: "\n").map({ $0.trimmingCharacters(in: .whitespaces) })
+                .contains("container")
+        {
             let install = try await ProcessRunner.run(
-                HomebrewStep.brewPath, ["install", "--cask", "container"], timeout: .seconds(1800))
+                HomebrewStep.brewPath, ["install", "container"], timeout: .seconds(1800))
             if install.succeeded {
-                _ = try? await ProcessRunner.run("container", ["system", "start"], timeout: .seconds(180))
+                if let start = try? await ContainerCommand.invocation(["system", "start"]) {
+                    _ = try? await ProcessRunner.run(
+                        start.executable, start.arguments, timeout: .seconds(180))
+                }
                 return "installed `container` via Homebrew"
             }
         }
         throw InstallError(Self.manualInstructions)
     }
 }
-
-// MARK: - 5. Tailscale
-
-/// §9.5 step 5: partly automatable at best — the first login is interactive
-/// and there is no way around it.
