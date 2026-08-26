@@ -59,7 +59,8 @@ struct ControlPlane: Sendable {
             failedLast24h: try await store.countJobs(status: .failed, since: dayAgo),
             watchedRepos: config.github.repos,
             lastPollAt: lastPollRaw.flatMap { ISO8601DateFormatter().date(from: $0) },
-            lastPollError: try await store.state(SaplingStore.StateKey.lastPollError)
+            lastPollError: try await store.state(SaplingStore.StateKey.lastPollError),
+            metrics: await agent?.metrics.current()
         )
     }
 
@@ -91,6 +92,17 @@ struct ControlPlane: Sendable {
             expiresAt: token.expiresAt,
             controlPlaneURL: controlPlaneURL
         )
+    }
+
+    /// Recent hardware samples, for a chart.
+    ///
+    /// - Parameter limit: Most recent N samples, or all held when `nil`.
+    /// - Returns: Samples oldest first, and the gap between them.
+    public func metricsHistory(limit: Int?) async -> MetricsHistoryResponse {
+        let samples = await agent?.metrics.recent(limit: limit) ?? []
+        return MetricsHistoryResponse(
+            samples: samples,
+            intervalSeconds: Int(MetricsCollector.interval.components.seconds))
     }
 
     // MARK: - Updates

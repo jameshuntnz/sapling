@@ -47,6 +47,8 @@ public struct StatusResponse: Codable, Sendable {
     public var lastPollAt: Date?
     /// Why the last poll failed, if it did.
     public var lastPollError: String?
+    /// What the hardware is doing, when the node is reporting it.
+    public var metrics: NodeMetrics?
 
     /// Creates a status summary.
     public init(
@@ -59,7 +61,8 @@ public struct StatusResponse: Codable, Sendable {
         failedLast24h: Int,
         watchedRepos: [String],
         lastPollAt: Date?,
-        lastPollError: String?
+        lastPollError: String?,
+        metrics: NodeMetrics? = nil
     ) {
         self.version = version
         self.node = node
@@ -71,6 +74,7 @@ public struct StatusResponse: Codable, Sendable {
         self.watchedRepos = watchedRepos
         self.lastPollAt = lastPollAt
         self.lastPollError = lastPollError
+        self.metrics = metrics
     }
 }
 

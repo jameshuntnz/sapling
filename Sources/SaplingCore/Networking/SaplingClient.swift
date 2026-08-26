@@ -113,6 +113,17 @@ public struct SaplingClient: Sendable {
         return try await send("GET", path, as: LogsResponse.self)
     }
 
+    /// Fetches recent hardware samples for a chart.
+    ///
+    /// - Parameter limit: Most recent N samples, or all held when `nil`.
+    /// - Returns: Samples oldest first, and the gap between them.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func metricsHistory(limit: Int? = nil) async throws -> MetricsHistoryResponse {
+        var path = "api/v1/metrics"
+        if let limit { path += "?limit=\(limit)" }
+        return try await send("GET", path, as: MetricsHistoryResponse.self)
+    }
+
     /// Asks whether a newer version is available on the node's channel.
     ///
     /// - Returns: What is available, and what is running now.

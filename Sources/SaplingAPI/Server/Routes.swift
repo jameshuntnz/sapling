@@ -92,6 +92,11 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
         return try jsonResponse(logs)
     }
 
+    v1.get("metrics") { request async throws -> Response in
+        let limit = try? request.query.get(Int.self, at: "limit")
+        return try jsonResponse(await controlPlane.metricsHistory(limit: limit))
+    }
+
     v1.get("update") { _ async throws -> Response in
         try jsonResponse(await controlPlane.checkForUpdate())
     }

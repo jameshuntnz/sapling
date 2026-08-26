@@ -22,6 +22,8 @@ final class AppModel {
     var selectedJobID: String?
     var selectedJobDetail: JobDetailResponse?
     var lastUpdated: Date?
+    /// Recent hardware samples, for the trend behind each meter.
+    var metricsHistory: [NodeMetrics] = []
 
     /// Where the daemon lives.
     ///
@@ -78,6 +80,12 @@ final class AppModel {
 
             self.status = status
             self.jobs = jobs
+            // Only while someone is looking: the history is for the chart, and
+            // fetching it every 30s in the background is pure noise.
+            if isMenuOpen {
+                self.metricsHistory =
+                    (try? await client.metricsHistory(limit: 60))?.samples ?? metricsHistory
+            }
             self.connection = .connected
             self.lastUpdated = Date()
 

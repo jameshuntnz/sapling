@@ -38,6 +38,15 @@ struct PanelView: View {
                             SlotsView(slots: status.slots)
                         }
 
+                        if let metrics = status.metrics {
+                            VStack(alignment: .leading, spacing: 8) {
+                                SectionHeader(
+                                    title: "Node",
+                                    trailing: metrics.isUnderMemoryPressure ? "under pressure" : nil)
+                                MetricsView(metrics: metrics, history: model.metricsHistory)
+                            }
+                        }
+
                         if let error = status.lastPollError {
                             Label(error, systemImage: "exclamationmark.triangle")
                                 .font(.caption)

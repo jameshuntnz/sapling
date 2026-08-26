@@ -34,7 +34,11 @@ public actor NodeAgent {
     /// Gap between those attempts.
     static let conclusionRetryDelay: Duration = .seconds(3)
 
+    /// Samples the hardware, so the UI can show what the node is doing.
+    public let metrics = MetricsCollector()
+
     var pollTask: Task<Void, Never>?
+    var metricsTask: Task<Void, Never>?
     var housekeepingTask: Task<Void, Never>?
     var runningJobs: [String: Task<Void, Never>] = [:]
     var networkGuardApplied = false
@@ -90,6 +94,7 @@ public actor NodeAgent {
         await warnAboutPublicRepos()
 
         pollTask = Task { [weak self] in await self?.pollLoop() }
+        metricsTask = Task { [weak self] in await self?.metrics.run() }
         housekeepingTask = Task { [weak self] in await self?.housekeepingLoop() }
         Log.info("node agent started as \(nodeID) — watching \(config.github.repos.joined(separator: ", "))")
     }
@@ -97,6 +102,7 @@ public actor NodeAgent {
     /// Stops polling, cancels running jobs, and marks the node offline.
     public func stop() async {
         pollTask?.cancel()
+        metricsTask?.cancel()
         housekeepingTask?.cancel()
         for task in runningJobs.values { task.cancel() }
         runningJobs.removeAll()

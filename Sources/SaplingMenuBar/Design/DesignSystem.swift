@@ -37,6 +37,9 @@ enum Palette {
     }
 }
 
+/// Value formatting shared across the panel.
+enum Format {}
+
 enum Metrics {
     static let panelWidth: CGFloat = 380
     static let panelHeight: CGFloat = 520
