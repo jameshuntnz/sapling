@@ -14,22 +14,33 @@ public struct NetworkConfig: Codable, Sendable {
     ///
     /// Takes precedence over the blocked ranges.
     public var allowedCIDRs: [String]
+    /// Subnets that job environments live on.
+    ///
+    /// Declared rather than discovered: the host bridge only exists while a VM
+    /// or container is actually running, so waiting to observe one would leave
+    /// the filter absent at exactly the moment a job's traffic starts flowing.
+    /// Both Tart and Apple's `container` use vmnet's shared range by default.
+    /// Any bridge that is up gets merged in on top of this.
+    public var jobSubnets: [String]
 
     enum CodingKeys: String, CodingKey {
         case blockPrivateRanges = "block_private_ranges"
         case extraBlockedCIDRs = "extra_blocked_cidrs"
         case allowedCIDRs = "allowed_cidrs"
+        case jobSubnets = "job_subnets"
     }
 
     /// Creates an infrastructure configuration.
     public init(
         blockPrivateRanges: Bool = true,
         extraBlockedCIDRs: [String] = [],
-        allowedCIDRs: [String] = []
+        allowedCIDRs: [String] = [],
+        jobSubnets: [String] = ["192.168.64.0/24"]
     ) {
         self.blockPrivateRanges = blockPrivateRanges
         self.extraBlockedCIDRs = extraBlockedCIDRs
         self.allowedCIDRs = allowedCIDRs
+        self.jobSubnets = jobSubnets
     }
 
     /// Creates an infrastructure configuration.
@@ -38,6 +49,7 @@ public struct NetworkConfig: Codable, Sendable {
         blockPrivateRanges = try c.decodeIfPresent(Bool.self, forKey: .blockPrivateRanges) ?? true
         extraBlockedCIDRs = try c.decodeIfPresent([String].self, forKey: .extraBlockedCIDRs) ?? []
         allowedCIDRs = try c.decodeIfPresent([String].self, forKey: .allowedCIDRs) ?? []
+        jobSubnets = try c.decodeIfPresent([String].self, forKey: .jobSubnets) ?? ["192.168.64.0/24"]
     }
 }
 

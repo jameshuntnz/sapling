@@ -40,3 +40,27 @@ struct NetworkGuardTests {
         }
     }
 }
+
+/// The egress filter must be in place *before* a job's traffic starts, but the host bridge only exists while
+/// an environment is already running.
+///
+/// These cover the declared-subnet path that closes that gap.
+@Suite("Declared job subnets")
+struct DeclaredJobSubnetTests {
+    @Test("derives the vmnet gateway from a subnet")
+    func gatewayDerivation() {
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "192.168.64.0/24") == "192.168.64.1/32")
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "10.0.0.0/8") == "10.0.0.1/32")
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "172.16.32.0/20") == "172.16.32.1/32")
+        // An address mid-subnet still resolves to that subnet's gateway.
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "192.168.64.7/24") == "192.168.64.1/32")
+    }
+
+    @Test("rejects malformed subnets rather than inventing a gateway")
+    func rejectsMalformed() {
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "192.168.64.0") == nil)
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "not/a/subnet") == nil)
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "192.168.64.0/99") == nil)
+        #expect(NetworkGuard.gatewayCIDR(forSubnet: "") == nil)
+    }
+}

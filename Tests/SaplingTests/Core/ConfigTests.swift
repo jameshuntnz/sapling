@@ -83,3 +83,42 @@ struct ConfigTests {
         #expect(config.warnings().contains { $0.contains("Tailscale") })
     }
 }
+
+@Suite("Job subnets")
+struct JobSubnetConfigTests {
+    /// vmnet's shared range, which both Tart and Apple's `container` use.
+    @Test("defaults to the vmnet shared range")
+    func defaultSubnet() {
+        #expect(NetworkConfig().jobSubnets == ["192.168.64.0/24"])
+    }
+
+    @Test("survives a TOML round trip")
+    func roundTrip() throws {
+        var config = SaplingConfig()
+        config.github.repos = ["acme/widgets"]
+        config.network.jobSubnets = ["192.168.64.0/24", "192.168.65.0/24"]
+
+        let directory = try TemporaryDirectory()
+        let url = directory.appending("config.toml")
+        try config.save(to: url)
+
+        let loaded = try SaplingConfig.load(from: url)
+        #expect(loaded.network.jobSubnets == ["192.168.64.0/24", "192.168.65.0/24"])
+    }
+
+    /// A config written before this field existed must still load.
+    @Test("older configs without the field get the default")
+    func absentFieldDefaults() throws {
+        let config = try ConfigFixture.decode(
+            """
+            [github]
+            auth = "pat"
+            token = "ghp_example"
+            repos = ["acme/widgets"]
+
+            [network]
+            block_private_ranges = true
+            """)
+        #expect(config.network.jobSubnets == ["192.168.64.0/24"])
+    }
+}

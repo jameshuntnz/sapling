@@ -10,11 +10,24 @@ extension NodeAgent {
             Self.runnerNamePrefix + job.platform.rawValue + "-"
             + String(UUID().uuidString.prefix(8)).lowercased()
 
-        // The bridge interface only exists once something has run, so this is
-        // the reliable point to (re)assert the egress filter.
-        if config.network.blockPrivateRanges, !networkGuardApplied {
-            if (try? await NetworkGuard(config: config.network).apply()) != nil {
+        // Re-asserted before every job rather than once: a bridge that came up
+        // since the last job may sit on a subnet the loaded rules don't cover,
+        // and running a job unfiltered is the one outcome §8 rules out. If the
+        // filter can't be applied, the job fails closed rather than running.
+        if config.network.blockPrivateRanges {
+            do {
+                try await NetworkGuard(config: config.network).apply()
                 networkGuardApplied = true
+            } catch {
+                networkGuardApplied = false
+                let reason =
+                    "refusing to start: egress filter could not be applied "
+                    + "(\(error.localizedDescription))"
+                await events.record(RunEventName.jobFailed, detail: reason)
+                try? await store.updateJobStatus(
+                    id: job.id, status: .failed, exitReason: reason, completedAt: Date())
+                Log.error("job \(job.id): \(reason)")
+                return
             }
         }
 

@@ -62,13 +62,19 @@ public struct NetworkGuard: Sendable {
             throw NetworkGuardError.notRoot
         }
 
-        let interfaces = try await Self.discoverBridgeInterfaces()
-        guard !interfaces.isEmpty else {
+        // Declared subnets first, then whatever is currently up. The bridge is
+        // torn down whenever no environment is running, so discovery alone
+        // would leave the filter absent at the moment a job starts.
+        let interfaces = (try? await Self.discoverBridgeInterfaces()) ?? []
+        var jobSubnets = config.jobSubnets
+        var gateways = config.jobSubnets.compactMap(Self.gatewayCIDR(forSubnet:))
+        for interface in interfaces where !jobSubnets.contains(interface.subnet) {
+            jobSubnets.append(interface.subnet)
+            gateways.append("\(interface.address)/32")
+        }
+        guard !jobSubnets.isEmpty else {
             throw NetworkGuardError.noJobNetworks
         }
-
-        let jobSubnets = interfaces.map(\.subnet)
-        let gateways = interfaces.map { "\($0.address)/32" }
         let blocked = Self.defaultBlockedCIDRs + config.extraBlockedCIDRs
         // The bridge gateway has to stay reachable or the VM loses DHCP, DNS,
         // and the host cache proxy along with its internet access.
@@ -194,6 +200,22 @@ public struct NetworkGuard: Sendable {
                 ))
         }
         return interfaces
+    }
+
+    /// The gateway vmnet assigns for a subnet: its first usable host.
+    ///
+    /// `192.168.64.0/24` becomes `192.168.64.1/32`. The gateway has to stay
+    /// reachable or the environment loses DHCP, DNS, and the cache proxy.
+    static func gatewayCIDR(forSubnet subnet: String) -> String? {
+        let parts = subnet.split(separator: "/")
+        guard parts.count == 2 else { return nil }
+        let octets = parts[0].split(separator: ".").compactMap { UInt32($0) }
+        guard octets.count == 4, let prefix = Int(parts[1]), prefix <= 32 else { return nil }
+        let packed = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]
+        let mask: UInt32 = prefix == 0 ? 0 : ~UInt32(0) << (32 - prefix)
+        let gateway = (packed & mask) | 1
+        return
+            "\((gateway >> 24) & 0xFF).\((gateway >> 16) & 0xFF).\((gateway >> 8) & 0xFF).\(gateway & 0xFF)/32"
     }
 
     /// ifconfig prints netmasks as `0xffffff00`; pf wants a prefix length.
