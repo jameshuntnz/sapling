@@ -2,6 +2,12 @@ import Foundation
 
 /// The `[network]` section: what job environments are allowed to reach.
 public struct NetworkConfig: Codable, Sendable {
+    /// The subnets vmnet allocates for VM and container networking.
+    ///
+    /// Eight is well beyond what a two-macOS-slot node will use, and each
+    /// unused entry is a table row that never matches.
+    public static let defaultJobSubnets = (64...71).map { "192.168.\($0).0/24" }
+
     /// §8: a compromised job should reach the internet but not the LAN.
     ///
     /// The Mac mini also hosts deployment infrastructure, so this defaults on and
@@ -19,8 +25,13 @@ public struct NetworkConfig: Codable, Sendable {
     /// Declared rather than discovered: the host bridge only exists while a VM
     /// or container is actually running, so waiting to observe one would leave
     /// the filter absent at exactly the moment a job's traffic starts flowing.
-    /// Both Tart and Apple's `container` use vmnet's shared range by default.
-    /// Any bridge that is up gets merged in on top of this.
+    ///
+    /// vmnet hands out `192.168.64.0/24`, then `.65`, `.66` and upward as more
+    /// networks come up, and which provider lands on which is not fixed —
+    /// Apple's `container` and Tart routinely differ, and differ again across
+    /// reboots. So the default covers the range vmnet allocates from rather
+    /// than a single subnet; a subnet with no interface behind it costs
+    /// nothing in pf. Any bridge that is up gets merged in on top.
     public var jobSubnets: [String]
 
     enum CodingKeys: String, CodingKey {
@@ -35,7 +46,7 @@ public struct NetworkConfig: Codable, Sendable {
         blockPrivateRanges: Bool = true,
         extraBlockedCIDRs: [String] = [],
         allowedCIDRs: [String] = [],
-        jobSubnets: [String] = ["192.168.64.0/24"]
+        jobSubnets: [String] = NetworkConfig.defaultJobSubnets
     ) {
         self.blockPrivateRanges = blockPrivateRanges
         self.extraBlockedCIDRs = extraBlockedCIDRs
@@ -49,7 +60,7 @@ public struct NetworkConfig: Codable, Sendable {
         blockPrivateRanges = try c.decodeIfPresent(Bool.self, forKey: .blockPrivateRanges) ?? true
         extraBlockedCIDRs = try c.decodeIfPresent([String].self, forKey: .extraBlockedCIDRs) ?? []
         allowedCIDRs = try c.decodeIfPresent([String].self, forKey: .allowedCIDRs) ?? []
-        jobSubnets = try c.decodeIfPresent([String].self, forKey: .jobSubnets) ?? ["192.168.64.0/24"]
+        jobSubnets = try c.decodeIfPresent([String].self, forKey: .jobSubnets) ?? Self.defaultJobSubnets
     }
 }
 

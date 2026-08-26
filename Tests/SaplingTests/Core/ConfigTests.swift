@@ -86,10 +86,14 @@ struct ConfigTests {
 
 @Suite("Job subnets")
 struct JobSubnetConfigTests {
-    /// vmnet's shared range, which both Tart and Apple's `container` use.
-    @Test("defaults to the vmnet shared range")
+    /// vmnet allocates 192.168.64.0/24 upward as networks come up, and which
+    /// provider lands on which is not fixed, so the default spans the range.
+    @Test("defaults to vmnet's allocation range")
     func defaultSubnet() {
-        #expect(NetworkConfig().jobSubnets == ["192.168.64.0/24"])
+        let subnets = NetworkConfig().jobSubnets
+        #expect(subnets.first == "192.168.64.0/24")
+        #expect(subnets.contains("192.168.65.0/24"), "Tart and container land on different subnets")
+        #expect(subnets.count == 8)
     }
 
     @Test("survives a TOML round trip")
@@ -119,6 +123,6 @@ struct JobSubnetConfigTests {
             [network]
             block_private_ranges = true
             """)
-        #expect(config.network.jobSubnets == ["192.168.64.0/24"])
+        #expect(config.network.jobSubnets == NetworkConfig.defaultJobSubnets)
     }
 }

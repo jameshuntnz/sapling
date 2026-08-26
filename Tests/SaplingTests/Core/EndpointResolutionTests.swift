@@ -3,7 +3,7 @@ import Testing
 
 @testable import SaplingCore
 
-@Suite("Endpoint resolution order")
+@Suite("Endpoint resolution order", .serialized)
 struct EndpointResolutionTests {
     /// Documented contract: flag, then environment, then saved client config,
     /// then the local daemon's own config, then loopback.
