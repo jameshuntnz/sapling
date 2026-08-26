@@ -202,6 +202,13 @@ Three more decisions came up during implementation and are documented where they
 
 ---
 
+## Picking up the work
+
+[docs/AUTOMATION-GAPS.md](docs/AUTOMATION-GAPS.md) lists everything a human had
+to do by hand to bring up the first node, why `sapling install` didn't do it,
+and what closing each gap would take. It's written for whoever works on this
+next — start there rather than here.
+
 ## Development
 
 ```bash
