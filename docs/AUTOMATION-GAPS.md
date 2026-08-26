@@ -201,6 +201,22 @@ GitHub is now authoritative. But the staleness itself is unaddressed.)*
 
 ## Gap 9 — Every deploy needs an interactive sudo
 
+**Closed.** `sapling update` asks the daemon to update itself; since the daemon
+is already root, no `sudo` is involved. See [RELEASING.md](RELEASING.md).
+
+Two things it opened, both worth doing:
+
+- **Releases are not code-signed.** The daemon verifies a downloaded archive
+  against the `SHA256SUMS` published beside it, which catches corruption but
+  not a compromised repository — the checksums come from the same place as the
+  archive. Signing with a Developer ID and verifying the signature before
+  installing would close it.
+- **The node builds its own updates.** CI runs on the node, so a compromised
+  node would build and then install its compromised release. Acceptable for a
+  single-owner private setup; worth knowing before it is one.
+
+### Superseded — kept for context
+
 **Severity: medium.** Friction, not danger — but it shaped the whole session.
 
 `sapling upgrade` writes `/usr/local/bin` and kickstarts the LaunchDaemon, so

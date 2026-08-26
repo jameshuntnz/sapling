@@ -1,0 +1,117 @@
+name: Release
+
+# Every push to main publishes a dev build. Promotion to rc and stable is
+# deliberate — run this workflow by hand and choose the channel.
+#
+# Hotfixes are cut from a release branch (release/X.Y.x) so a fix can ship
+# without dragging in whatever has since landed on main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Which channel to publish"
+        required: true
+        default: rc
+        type: choice
+        options: [rc, stable, hotfix]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Sapling releases itself, on the node Sapling provisioned.
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # version derivation needs full history and tags
+
+      - name: Work out the version
+        id: version
+        run: |
+          CHANNEL="${{ github.event.inputs.channel || 'dev' }}"
+          VERSION="$(./scripts/next-version.sh "$CHANNEL" || true)"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          if [ -z "$VERSION" ]; then
+            echo "Nothing to release on $CHANNEL: no feat/fix/perf commits since the last release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Releasing $VERSION on $CHANNEL"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Never publish something that does not pass its own checks.
+      - name: Verify
+        if: steps.version.outputs.release == 'true'
+        run: |
+          ./scripts/lint.sh
+          ./scripts/check-file-sizes.sh
+          ./scripts/test-next-version.sh
+          swift test
+
+      - name: Stamp the version
+        if: steps.version.outputs.release == 'true'
+        run: |
+          sed -i '' "s/current = \"[^\"]*\"/current = \"${{ steps.version.outputs.version }}\"/" \
+            Sources/SaplingCore/Models/DTOs.swift
+          grep -n 'current = ' Sources/SaplingCore/Models/DTOs.swift
+
+      - name: Build and package
+        if: steps.version.outputs.release == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          swift build -c release --product sapling
+          mkdir -p dist && cp .build/release/sapling dist/
+          tar -czf "dist/sapling-${VERSION}-macos-arm64.tar.gz" -C dist sapling
+          rm dist/sapling
+          cd dist
+          # The daemon verifies this before installing anything it downloads.
+          shasum -a 256 *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Tag
+        if: steps.version.outputs.release == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "v${VERSION}"
+          git push origin "v${VERSION}"
+
+      # Only a finished release moves the version recorded in the source. A dev
+      # build's version is derived, and committing one per push would both spam
+      # main and re-trigger this workflow.
+      - name: Record the version on main
+        if: steps.version.outputs.release == 'true' && steps.version.outputs.channel == 'stable'
+        run: |
+          git add Sources/SaplingCore/Models/DTOs.swift
+          git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Publish
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CHANNEL="${{ steps.version.outputs.channel }}"
+          # Anything that isn't a finished release is marked prerelease, so
+          # `gh release list` and the update checker can tell them apart
+          # without parsing version strings.
+          PRERELEASE=""
+          [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "hotfix" ] || PRERELEASE="--prerelease"
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            $PRERELEASE \
+            dist/*.tar.gz dist/SHA256SUMS

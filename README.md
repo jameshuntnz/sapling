@@ -99,6 +99,7 @@ Runs the control plane against a seeded in-memory database — no GitHub, no VMs
 ## CLI
 
 ```
+sapling update             Install the newest release (no sudo — the daemon does it).
 sapling install            Bootstrap this Mac. Safe to re-run.
 sapling doctor             Read-only health check of every dependency.
 sapling upgrade            Replace the installed binary, restart the daemon.
@@ -179,6 +180,12 @@ allowed_cidrs = []             # escape hatch for a specific host
 enabled = true
 port = 8735
 proxies = ["go", "cargo"]
+
+[update]
+repository = "jameshuntnz/sapling"
+channel = "stable"       # stable | rc | dev
+check_interval_hours = 6
+auto_apply = false       # even when true, only applies while idle
 ```
 
 ---
@@ -201,6 +208,26 @@ Three more decisions came up during implementation and are documented where they
 - **Linux jobs need a login session on the node.** Apple's `container` stores state under the user's home and runs its apiserver in that user's GUI launchd domain, so root cannot talk to it directly — it returns `XPC connection error: Connection invalid`. Sapling reaches it with `launchctl asuser`, which requires a console user to be logged in. This is why the node is set up with automatic login, and it is a property of Apple's tool rather than a choice Sapling makes. §10 of the design doc assumed the daemon could be wholly independent of a GUI session; with `container` in the stack, it cannot be.
 
 ---
+
+## Releasing
+
+Commit messages drive versions. `feat:` bumps the minor, `fix:`/`perf:` the
+patch, `!` or `BREAKING CHANGE:` the major — and every push to `main` publishes
+a dev build automatically. Release candidates and releases are deliberate:
+
+```bash
+gh workflow run release.yml -f channel=stable
+```
+
+Nodes update themselves, without `sudo`, because the daemon is already root:
+
+```bash
+sapling update --check
+sapling update
+```
+
+See [docs/RELEASING.md](docs/RELEASING.md) for channels, hotfixes, and what the
+update mechanism does and doesn't verify.
 
 ## Picking up the work
 

@@ -113,6 +113,26 @@ public struct SaplingClient: Sendable {
         return try await send("GET", path, as: LogsResponse.self)
     }
 
+    /// Asks whether a newer version is available on the node's channel.
+    ///
+    /// - Returns: What is available, and what is running now.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func checkForUpdate() async throws -> UpdateCheckResponse {
+        try await send("GET", "api/v1/update", as: UpdateCheckResponse.self)
+    }
+
+    /// Tells the daemon to install the newest version on its channel.
+    ///
+    /// The daemon replies before restarting, so the next request will fail
+    /// briefly while it comes back.
+    ///
+    /// - Parameter force: Update even while jobs are running.
+    /// - Returns: What is being applied, or why nothing is.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func applyUpdate(force: Bool = false) async throws -> UpdateApplyResponse {
+        try await send("POST", "api/v1/update?force=\(force)", as: UpdateApplyResponse.self)
+    }
+
     /// Requests a single-use token for enrolling another node.
     public func joinToken() async throws -> JoinTokenResponse {
         try await send("POST", "api/v1/nodes/join-token", as: JoinTokenResponse.self)

@@ -17,9 +17,11 @@ public struct SaplingConfig: Codable, Sendable {
     public var network: NetworkConfig
     /// Host-side package caches.
     public var cache: CacheConfig
+    /// Where the daemon looks for new versions of itself.
+    public var update: UpdateConfig
 
     enum CodingKeys: String, CodingKey {
-        case node, server, github, macos, linux, network, cache
+        case node, server, github, macos, linux, network, cache, update
     }
 
     /// Creates a configuration.
@@ -30,7 +32,8 @@ public struct SaplingConfig: Codable, Sendable {
         macos: MacOSConfig = MacOSConfig(),
         linux: LinuxConfig = LinuxConfig(),
         network: NetworkConfig = NetworkConfig(),
-        cache: CacheConfig = CacheConfig()
+        cache: CacheConfig = CacheConfig(),
+        update: UpdateConfig = UpdateConfig()
     ) {
         self.node = node
         self.server = server
@@ -39,6 +42,7 @@ public struct SaplingConfig: Codable, Sendable {
         self.linux = linux
         self.network = network
         self.cache = cache
+        self.update = update
     }
 
     /// Creates a configuration.
@@ -51,6 +55,7 @@ public struct SaplingConfig: Codable, Sendable {
         linux = try c.decodeIfPresent(LinuxConfig.self, forKey: .linux) ?? LinuxConfig()
         network = try c.decodeIfPresent(NetworkConfig.self, forKey: .network) ?? NetworkConfig()
         cache = try c.decodeIfPresent(CacheConfig.self, forKey: .cache) ?? CacheConfig()
+        update = try c.decodeIfPresent(UpdateConfig.self, forKey: .update) ?? UpdateConfig()
     }
 
     // MARK: - Loading and saving

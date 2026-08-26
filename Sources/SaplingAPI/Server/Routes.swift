@@ -92,6 +92,17 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
         return try jsonResponse(logs)
     }
 
+    v1.get("update") { _ async throws -> Response in
+        try jsonResponse(await controlPlane.checkForUpdate())
+    }
+
+    v1.post("update") { request async throws -> Response in
+        // Updating restarts the daemon, which fails every running job, so it
+        // has to be asked for explicitly while the node is busy.
+        let force = (try? request.query.get(Bool.self, at: "force")) ?? false
+        return try jsonResponse(await controlPlane.applyUpdate(force: force))
+    }
+
     v1.post("drain") { _ async throws -> Response in
         try jsonResponse(try await controlPlane.drain())
     }

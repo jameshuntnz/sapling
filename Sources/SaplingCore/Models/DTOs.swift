@@ -151,6 +151,59 @@ public struct ControlResponse: Codable, Sendable {
     }
 }
 
+/// Response body for `GET /api/v1/update`.
+public struct UpdateCheckResponse: Codable, Sendable {
+    /// The version running now.
+    public var current: String
+    /// Which release stream this node follows.
+    public var channel: ReleaseChannel
+    /// The version available, or `nil` when the node is current.
+    public var available: String?
+    /// That version's release tag.
+    public var tag: String?
+    /// When it was published.
+    public var publishedAt: Date?
+    /// Why the check failed, when it did.
+    public var error: String?
+
+    /// Creates an update check result.
+    public init(
+        current: String,
+        channel: ReleaseChannel,
+        available: String? = nil,
+        tag: String? = nil,
+        publishedAt: Date? = nil,
+        error: String? = nil
+    ) {
+        self.current = current
+        self.channel = channel
+        self.available = available
+        self.tag = tag
+        self.publishedAt = publishedAt
+        self.error = error
+    }
+}
+
+/// Response body for `POST /api/v1/update`.
+///
+/// Applying an update restarts the daemon, so a successful response is sent
+/// before the restart and the connection then drops. That is expected.
+public struct UpdateApplyResponse: Codable, Sendable {
+    /// Whether the update was accepted and is being applied.
+    public var applying: Bool
+    /// The version being installed, when one is.
+    public var version: String?
+    /// What happened, phrased for a person.
+    public var message: String
+
+    /// Creates an update apply result.
+    public init(applying: Bool, version: String? = nil, message: String) {
+        self.applying = applying
+        self.version = version
+        self.message = message
+    }
+}
+
 /// The body returned for any non-2xx API response.
 ///
 /// Errors use the same JSON shape as everything else so clients never have to

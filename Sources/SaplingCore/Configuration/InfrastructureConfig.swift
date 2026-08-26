@@ -103,3 +103,53 @@ public struct CacheConfig: Codable, Sendable {
         maxSizeGB = try c.decodeIfPresent(Int.self, forKey: .maxSizeGB) ?? 20
     }
 }
+
+/// The `[update]` section: where the daemon looks for new versions of itself.
+public struct UpdateConfig: Codable, Sendable {
+    /// Repository publishing Sapling's releases, as `owner/repo`.
+    public var repository: String
+    /// Which release stream this node follows.
+    ///
+    /// A node on `stable` ignores rc and dev builds entirely; one on `dev`
+    /// takes whatever is newest. Derived from each release's own version, so
+    /// a release mislabelled in GitHub's UI cannot put a dev build on a
+    /// production node.
+    public var channel: ReleaseChannel
+    /// How often to look for a new version.
+    ///
+    /// Zero disables checking.
+    public var checkIntervalHours: Int
+    /// Install a new version as soon as one is found.
+    ///
+    /// Off by default. Even when on, an update is only applied while the node
+    /// is idle — replacing the daemon mid-job would orphan a running VM.
+    public var autoApply: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case repository, channel
+        case checkIntervalHours = "check_interval_hours"
+        case autoApply = "auto_apply"
+    }
+
+    /// Creates an update configuration.
+    public init(
+        repository: String = "jameshuntnz/sapling",
+        channel: ReleaseChannel = .stable,
+        checkIntervalHours: Int = 6,
+        autoApply: Bool = false
+    ) {
+        self.repository = repository
+        self.channel = channel
+        self.checkIntervalHours = checkIntervalHours
+        self.autoApply = autoApply
+    }
+
+    /// Reads an update configuration, defaulting anything absent.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        repository = try c.decodeIfPresent(String.self, forKey: .repository) ?? "jameshuntnz/sapling"
+        channel = try c.decodeIfPresent(ReleaseChannel.self, forKey: .channel) ?? .stable
+        checkIntervalHours = try c.decodeIfPresent(Int.self, forKey: .checkIntervalHours) ?? 6
+        autoApply = try c.decodeIfPresent(Bool.self, forKey: .autoApply) ?? false
+    }
+}
