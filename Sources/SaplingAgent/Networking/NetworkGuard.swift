@@ -66,8 +66,20 @@ public struct NetworkGuard: Sendable {
         // torn down whenever no environment is running, so discovery alone
         // would leave the filter absent at the moment a job starts.
         let interfaces = (try? await Self.discoverBridgeInterfaces()) ?? []
-        var jobSubnets = config.jobSubnets
-        var gateways = config.jobSubnets.compactMap(Self.gatewayCIDR(forSubnet:))
+
+        // Unioned with the built-in defaults, never replaced by config.
+        //
+        // `sapling install` writes every field to config.toml, defaults
+        // included, which freezes them: a node installed when the default was
+        // a single subnet kept that single subnet after the default widened,
+        // and the improvement never arrived. That left macOS VMs — which vmnet
+        // puts on a different subnet than containers — entirely unfiltered,
+        // while the rules looked correct.
+        //
+        // For a security control the rule is that a stale config may add
+        // coverage but never subtract it.
+        var jobSubnets = Array(Set(config.jobSubnets).union(NetworkConfig.defaultJobSubnets)).sorted()
+        var gateways = jobSubnets.compactMap(Self.gatewayCIDR(forSubnet:))
         for interface in interfaces where !jobSubnets.contains(interface.subnet) {
             jobSubnets.append(interface.subnet)
             gateways.append("\(interface.address)/32")

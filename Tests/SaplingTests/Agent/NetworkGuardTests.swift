@@ -114,3 +114,40 @@ struct NetworkGuardReloadTests {
         #expect(gateways.contains("192.168.65.1/32"))
     }
 }
+
+/// `sapling install` writes every field to config.toml, defaults included, so a default that improves later
+/// never reaches an existing node.
+///
+/// That is tolerable for a timeout and not for a security control: a node installed when the default was one
+/// subnet kept one subnet, and its macOS VMs — which land on a different subnet than containers — ran
+/// unfiltered while the rules read as correct.
+@Suite("Job subnet coverage")
+struct JobSubnetCoverageTests {
+    /// Config may add coverage; it may never take the built-in range away.
+    @Test("a stale config cannot subtract coverage")
+    func staleConfigCannotSubtract() {
+        let stale = ["192.168.64.0/24"]
+        let effective = Set(stale).union(NetworkConfig.defaultJobSubnets)
+        for subnet in NetworkConfig.defaultJobSubnets {
+            #expect(effective.contains(subnet), "\(subnet) must survive a stale config")
+        }
+        // The one vmnet gave the macOS VM that slipped through.
+        #expect(effective.contains("192.168.65.0/24"))
+    }
+
+    @Test("config can still add subnets of its own")
+    func configCanAdd() {
+        let custom = ["10.99.0.0/24"]
+        let effective = Set(custom).union(NetworkConfig.defaultJobSubnets)
+        #expect(effective.contains("10.99.0.0/24"))
+        #expect(effective.count == NetworkConfig.defaultJobSubnets.count + 1)
+    }
+
+    @Test("every covered subnet gets a reachable gateway")
+    func everySubnetHasAGateway() {
+        let effective = Set(["10.99.0.0/24"]).union(NetworkConfig.defaultJobSubnets)
+        let gateways = effective.compactMap(NetworkGuard.gatewayCIDR(forSubnet:))
+        #expect(gateways.count == effective.count)
+        #expect(gateways.contains("10.99.0.1/32"))
+    }
+}
