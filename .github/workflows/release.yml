@@ -5,17 +5,20 @@ name: Release
 #
 # Hotfixes are cut from a release branch (release/X.Y.x) so a fix can ship
 # without dragging in whatever has since landed on main.
+# Releases are deliberate. Publishing on every push to main meant routine
+# commits produced dev.2, dev.3, dev.4 — each one occupying half the node for
+# five minutes to build something nobody asked for.
+#
+# Pushes to main are verified by CI. Publishing is a decision you make.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       channel:
         description: "Which channel to publish"
         required: true
-        default: rc
+        default: dev
         type: choice
-        options: [rc, stable, hotfix]
+        options: [dev, rc, stable, hotfix]
 
 concurrency:
   group: release
@@ -35,22 +38,10 @@ jobs:
         with:
           fetch-depth: 0  # version derivation needs full history and tags
 
-      # Worth it by a distance: an uncached release spends ~460s compiling,
-      # a cached one ~30s. The restore itself costs ~130s, which is the price
-      # of every job running in a fresh VM with an empty .build.
-      - name: Cache SwiftPM build
-        uses: actions/cache@v4
-        with:
-          path: .build
-          key: spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
-          restore-keys: |
-            spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved') }}-
-            spm-release-${{ runner.os }}-
-
       - name: Work out the version
         id: version
         run: |
-          CHANNEL="${{ github.event.inputs.channel || 'dev' }}"
+          CHANNEL="${{ github.event.inputs.channel }}"
           VERSION="$(./scripts/next-version.sh "$CHANNEL" || true)"
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           if [ -z "$VERSION" ]; then

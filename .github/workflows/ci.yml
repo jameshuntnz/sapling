@@ -1,16 +1,17 @@
 name: CI
 
-# Not on pushes at all, deliberately.
+# Main and pull requests, and nothing else.
 #
-# Pushes to main are covered by the release workflow, whose Verify step is a
-# superset of everything here — running both duplicated the work and, with two
-# macOS slots on the node, made each push queue behind itself for the better
-# part of ten minutes.
+# The release workflow no longer runs on push, so this is the only thing
+# checking main — and the two never run together, which is what made every
+# push queue behind itself.
 #
-# Pushes to other branches are not covered, and that is the trade: every run
-# boots a macOS VM for five or six minutes and occupies half the node. A
-# feature branch gets checked when it becomes a pull request, or on demand.
+# Other branches are deliberately not covered: each run boots a macOS VM for
+# minutes and occupies half the node. A branch gets checked when it becomes a
+# pull request, or on demand.
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -31,13 +32,6 @@ jobs:
 
       - name: Swift version
         run: swift --version
-
-      - name: Cache SwiftPM dependencies
-        uses: actions/cache@v4
-        with:
-          path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: spm-${{ runner.os }}-
 
       - name: Workflows
         run: ./scripts/check-workflows.sh
