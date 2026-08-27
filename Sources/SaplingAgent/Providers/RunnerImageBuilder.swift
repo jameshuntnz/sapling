@@ -89,9 +89,17 @@ struct RunnerImageBuilder: Sendable {
     private func build(
         image: RunnerImageRef, directory: String, events: any EventSink
     ) async throws {
-        let context = FileManager.default.temporaryDirectory
+        // Not FileManager.temporaryDirectory: that is $TMPDIR, which for the
+        // root daemon is a private per-user directory under /var/folders that
+        // mode 0700 keeps to itself. `container build` runs as the console
+        // user via SessionCommand, so it cannot read a context written there —
+        // it reports only "context dir does not exist", naming a path that
+        // plainly does. /tmp is world-traversable and works for both.
+        let context = URL(fileURLWithPath: "/tmp")
             .appendingPathComponent("sapling-build-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: context, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: context, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755])
         defer { try? FileManager.default.removeItem(at: context) }
 
         let files = try await github.treeFiles(repo: image.repo, treeSHA: image.treeSHA)
@@ -108,8 +116,13 @@ struct RunnerImageBuilder: Sendable {
             }
             let destination = context.appendingPathComponent(file.path)
             try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755])
             try file.data.write(to: destination)
+            // The daemon's umask is not this code's to assume, and a 0600
+            // Dockerfile is unreadable to the user actually running the build.
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: destination.path)
         }
 
         await events.log("building \(image.tag) from \(directory)/ (\(files.count) files)")
