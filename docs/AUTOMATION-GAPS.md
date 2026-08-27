@@ -289,8 +289,8 @@ Found during bring-up, not yet fixed.
 
 | Defect | Detail |
 |---|---|
-| Cache proxy gives up permanently | Waits 30 minutes for a bridge interface, then logs `no VM bridge interface appeared` and never retries. On a node that's idle at boot, the cache never starts. It should retry indefinitely, or bind the declared gateway from `network.job_subnets` without waiting. |
-| `doctor` can't verify pf as non-root | Run as `admin` it reports *"anchor wired; rules are written when the first job starts"* even when rules **are** loaded, because `pfctl -sr` needs root. Misleading. Either escalate for that check or say "cannot verify without root". |
+| ~~Cache proxy gives up permanently~~ | **Fixed.** `CacheProxySupervisor` now watches the bridge table and runs one listener per gateway, starting and stopping them as bridges come and go. It also no longer binds a single arbitrary gateway, which gave one platform a cache and the other an unroutable address. See [NETWORKING.md](NETWORKING.md). |
+| ~~`doctor` can't verify pf as non-root~~ | **Fixed.** `StepState.unverified` exists, and the firewall step reports "cannot verify without root" rather than `ok`. `doctor` prints those as `unknown` and does not count them as problems. |
 | Mixed log timestamps | Sapling logs UTC (`2026-08-26T11:09:18Z`), Vapor logs local (`2026-08-26T23:09:18+1200`). Same file, two clocks, twelve hours apart. Genuinely confusing when reading a log. |
 | No `sapling logs` command | Reading daemon logs means SSH-ing and `tail`-ing a file. The event log is served over the API; the daemon's own log isn't. |
 | Build cache goes over the network | Every job runs in a fresh VM with an empty `.build`, so CI restores a 919MB cache from GitHub — 128s, against a 22s incremental build. On a self-hosted node that is absurd: the cache could live on the host and be mounted into the VM with `tart run --dir`, making it a local disk read instead of a download. That needs Sapling to support mounting a directory into job environments, which would also give Linux jobs a shared package cache. Probably the single largest remaining win on build times. |

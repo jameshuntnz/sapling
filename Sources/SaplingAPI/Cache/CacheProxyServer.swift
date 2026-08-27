@@ -35,6 +35,14 @@ public struct CacheProxyServer: Sendable {
             app.middleware = .init()
             app.middleware.use(JSONErrorMiddleware())
 
+            // Proves to a job environment that the proxy is listening on
+            // the gateway it resolved, before it points a package manager at
+            // it. Cheap enough to sit on the critical path of every job.
+            let healthRoute = CacheConfig.healthPath.split(separator: "/").map {
+                PathComponent(stringLiteral: String($0))
+            }
+            app.get(healthRoute) { _ in "ok" }
+
             let proxy = self.proxy
             for (key, upstream) in await proxy.enabledUpstreams {
                 let segments = upstream.prefix.split(separator: "/").map {

@@ -98,6 +98,12 @@ public struct TartProvider: JobProvider, Sendable {
         let ip = try await waitForIP(vmName: vmName, timeout: request.bootTimeout)
         await events.record(RunEventName.vmBooted, detail: ip)
 
+        // Asked of the host, before anything is asked of the guest: it costs
+        // one `ifconfig` and it is the difference between failing now with the
+        // cause and spending the whole boot timeout on an SSH that was never
+        // going to connect, then blaming the base image for it.
+        try await verifyBridge(ip: ip, events: events)
+
         try await waitForSSH(ip: ip, timeout: request.bootTimeout)
         await events.record(RunEventName.sshConnected, detail: "\(config.sshUsername)@\(ip)")
 
@@ -112,72 +118,6 @@ public struct TartProvider: JobProvider, Sendable {
         await events.record(RunEventName.runnerRegistered, detail: request.runnerName)
 
         return try await runJob(ip: ip, request: request, events: events)
-    }
-
-    // MARK: - Boot
-
-    /// Fails the job unless the VM can reach GitHub.
-    ///
-    /// The macOS equivalent of the container probe, run over SSH so the failure
-    /// is recorded as Sapling's own event rather than buried in a job log the
-    /// runner may never get far enough to produce.
-    private func verifyEgress(ip: String, events: any EventSink) async throws {
-        let result = try await ProcessRunner.run(
-            "ssh",
-            sshArguments(ip: ip) + ["bash -s"],
-            standardInput: EgressCheck.probeScript,
-            timeout: .seconds(EgressCheck.timeout + 15)
-        )
-        guard !EgressCheck.isEgressFailure(result.exitCode), result.succeeded else {
-            throw ProviderError(EgressCheck.failureReason)
-        }
-        await events.log("egress ok")
-    }
-
-    private func waitForIP(vmName: String, timeout: Duration) async throws -> String {
-        let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
-            let command = try await Self.tart(["ip", vmName])
-            let result = try await ProcessRunner.run(command.executable, command.arguments)
-            let ip = result.trimmedOutput
-            if result.succeeded, !ip.isEmpty {
-                return ip
-            }
-            try await Task.sleep(for: .seconds(2))
-        }
-        throw ProviderError("VM \(vmName) never reported an IP address within \(timeout)")
-    }
-
-    private func waitForSSH(ip: String, timeout: Duration) async throws {
-        let deadline = ContinuousClock.now + timeout
-        var lastError = "connection never succeeded"
-        while ContinuousClock.now < deadline {
-            let result = try await ProcessRunner.run(
-                "ssh", sshArguments(ip: ip) + ["true"], timeout: .seconds(15))
-            if result.succeeded { return }
-            lastError = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            try await Task.sleep(for: .seconds(3))
-        }
-        throw ProviderError(
-            """
-            could not SSH into the VM at \(ip) as \(config.sshUsername): \(lastError).
-            Check that the base image has \(sshKeyPath).pub in ~/.ssh/authorized_keys \
-            and Remote Login enabled (see docs/BASE-IMAGE.md).
-            """)
-    }
-
-    func sshArguments(ip: String) -> [String] {
-        [
-            "-i", sshKeyPath,
-            "-o", "StrictHostKeyChecking=no",
-            // Every VM is a fresh clone reusing the subnet's IP range, so
-            // known_hosts would collide on every single job.
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR",
-            "-o", "ConnectTimeout=10",
-            "-o", "BatchMode=yes",
-            "\(config.sshUsername)@\(ip)",
-        ]
     }
 
     // MARK: - Runner
@@ -223,6 +163,7 @@ public struct TartProvider: JobProvider, Sendable {
         let command = """
             set -o pipefail
             cd ~/actions-runner
+            \(CacheEndpoint.exportScript(cache: request.cache, platform: .macos))
             \(exports)./run.sh --jitconfig \(shellQuote(request.jitConfig))
             """
 
@@ -244,6 +185,12 @@ public struct TartProvider: JobProvider, Sendable {
             group.addTask {
                 try await Task.sleep(for: request.jobTimeout)
                 return nil
+            }
+            // Races the job for its whole duration. The environments that
+            // failed here passed their egress check and lost the network
+            // later, which a check that only runs at the start cannot see.
+            group.addTask {
+                throw JobNetworkLost(reason: try await JobNetwork.awaitLoss(of: ip))
             }
 
             guard let first = try await group.next() else {

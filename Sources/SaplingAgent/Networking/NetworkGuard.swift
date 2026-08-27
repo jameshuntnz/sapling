@@ -65,7 +65,7 @@ public struct NetworkGuard: Sendable {
         // Declared subnets first, then whatever is currently up. The bridge is
         // torn down whenever no environment is running, so discovery alone
         // would leave the filter absent at the moment a job starts.
-        let interfaces = (try? await Self.discoverBridgeInterfaces()) ?? []
+        let bridges = (try? await BridgeTable.current()) ?? []
 
         // Unioned with the built-in defaults, never replaced by config.
         //
@@ -79,10 +79,10 @@ public struct NetworkGuard: Sendable {
         // For a security control the rule is that a stale config may add
         // coverage but never subtract it.
         var jobSubnets = Array(Set(config.jobSubnets).union(NetworkConfig.defaultJobSubnets)).sorted()
-        var gateways = jobSubnets.compactMap(Self.gatewayCIDR(forSubnet:))
-        for interface in interfaces where !jobSubnets.contains(interface.subnet) {
-            jobSubnets.append(interface.subnet)
-            gateways.append("\(interface.address)/32")
+        var gateways = jobSubnets.compactMap(BridgeTable.gatewayCIDR(forSubnet:))
+        for bridge in bridges where !jobSubnets.contains(bridge.subnet) {
+            jobSubnets.append(bridge.subnet)
+            gateways.append("\(bridge.address)/32")
         }
         guard !jobSubnets.isEmpty else {
             throw NetworkGuardError.noJobNetworks
@@ -95,7 +95,7 @@ public struct NetworkGuard: Sendable {
         // symptom is the agent unable to SSH into the VM it just booted, which
         // reads as a broken base image and is not.
         let jobnetEntries = jobSubnets.flatMap { subnet -> [String] in
-            guard let gateway = Self.gatewayCIDR(forSubnet: subnet) else { return [subnet] }
+            guard let gateway = BridgeTable.gatewayCIDR(forSubnet: subnet) else { return [subnet] }
             return [subnet, "!\(gateway.replacingOccurrences(of: "/32", with: ""))"]
         }
         let blocked = Self.defaultBlockedCIDRs + config.extraBlockedCIDRs
@@ -122,7 +122,7 @@ public struct NetworkGuard: Sendable {
         // be applied, a redundant reload failing would stop the node working
         // entirely. So: if what we would write is already loaded, do nothing.
         let existing = try? String(contentsOfFile: Self.anchorPath, encoding: .utf8)
-        if existing == rules, await Self.verify().loaded {
+        if existing == rules, await Self.verify().isLoaded {
             return Applied(
                 jobSubnets: jobSubnets, gateways: gateways, blocked: blocked, allowed: allowed)
         }
@@ -150,15 +150,37 @@ public struct NetworkGuard: Sendable {
         return Applied(jobSubnets: jobSubnets, gateways: gateways, blocked: blocked, allowed: allowed)
     }
 
+    /// What pf actually has loaded — or the fact that we could not find out.
+    ///
+    /// The third case is the point. `pfctl -sr` needs root and the CLI is not,
+    /// so `sapling doctor` used to print "anchor wired; rules are written when
+    /// the first job starts" whether the rules were loaded, absent, or
+    /// unreadable. Reporting green on an unknown is worse than reporting
+    /// nothing: it was still saying `ok` throughout an outage.
+    public enum AnchorState: Sendable {
+        /// The anchor is loaded and carries a block rule.
+        case loaded([String])
+        /// pf answered, and the anchor has no block rule in it.
+        case empty
+        /// pf could not be read, with the reason.
+        case unverifiable(String)
+
+        /// Whether the filter is known to be in force.
+        public var isLoaded: Bool { if case .loaded = self { true } else { false } }
+    }
+
     /// Read back what pf actually has loaded, rather than trusting that our
     /// write succeeded. `sapling doctor` uses this.
-    public static func verify() async -> (loaded: Bool, rules: [String]) {
+    public static func verify() async -> AnchorState {
+        guard getuid() == 0 else {
+            return .unverifiable("`pfctl -sr` needs root; run `sudo sapling doctor` to check the rules")
+        }
         guard
             let result = try? await ProcessRunner.run(
                 "pfctl", ["-a", anchorName, "-sr"], timeout: .seconds(20)),
             result.succeeded
         else {
-            return (false, [])
+            return .unverifiable("`pfctl -a \(anchorName) -sr` failed")
         }
         let rules = result.stdout
             .split(separator: "\n")
@@ -166,122 +188,24 @@ public struct NetworkGuard: Sendable {
             .filter { !$0.isEmpty }
         // An anchor that exists but has no block rule is worse than none at
         // all, because it looks configured.
-        let hasBlock = rules.contains { $0.hasPrefix("block") }
-        return (hasBlock, rules)
+        return rules.contains { $0.hasPrefix("block") } ? .loaded(rules) : .empty
     }
 
     /// Removes Sapling's rules from pf, leaving the anchor in place.
     public static func flush() async {
         _ = try? await ProcessRunner.run("pfctl", ["-a", anchorName, "-F", "rules"], timeout: .seconds(20))
     }
-
-    // MARK: - Interface discovery
-
-    /// A `bridge*` interface macOS created for VM networking.
-    public struct BridgeInterface: Sendable {
-        /// Interface name, for example `bridge100`.
-        public let name: String
-        /// The host's address on this bridge — the job environments' gateway.
-        public let address: String
-        /// Netmask as `ifconfig` reports it, in hex.
-        public let netmask: String
-        /// The network in CIDR form, which is what pf tables want.
-        public let subnet: String
-    }
-
-    /// Find the `bridge*` interfaces macOS creates for VM networking.
-    ///
-    /// These are created on demand — the first Tart VM or container brings
-    /// one up — so this is re-run each time the guard is applied rather than
-    /// cached at startup.
-    public static func discoverBridgeInterfaces() async throws -> [BridgeInterface] {
-        let result = try await ProcessRunner.run("ifconfig", [], timeout: .seconds(20))
-        guard result.succeeded else {
-            throw NetworkGuardError.loadFailed("could not run ifconfig: \(result.stderr)")
-        }
-        return parseInterfaces(from: result.stdout)
-    }
-
-    /// Split out from the `ifconfig` call so the parsing can be exercised
-    /// against real output containing bridges — a dev Mac has none, and the
-    /// pf rules are only as correct as this.
-    static func parseInterfaces(from output: String) -> [BridgeInterface] {
-        var interfaces: [BridgeInterface] = []
-        var currentName: String?
-
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(rawLine)
-            if !line.hasPrefix("\t") && !line.hasPrefix(" ") {
-                currentName = line.split(separator: ":").first.map(String.init)
-                continue
-            }
-            guard let name = currentName, name.hasPrefix("bridge") else { continue }
-
-            // ifconfig indents continuation lines with a tab, so splitting
-            // on spaces alone leaves "\tinet" and never matches.
-            let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
-            guard let inetIndex = fields.firstIndex(of: "inet"),
-                inetIndex + 1 < fields.count,
-                let maskIndex = fields.firstIndex(of: "netmask"),
-                maskIndex + 1 < fields.count
-            else { continue }
-
-            let address = fields[inetIndex + 1]
-            let maskHex = fields[maskIndex + 1]
-            guard let prefix = prefixLength(fromHexNetmask: maskHex),
-                let subnet = networkCIDR(address: address, prefix: prefix)
-            else { continue }
-
-            interfaces.append(
-                BridgeInterface(
-                    name: name,
-                    address: address,
-                    netmask: maskHex,
-                    subnet: subnet
-                ))
-        }
-        return interfaces
-    }
-
-    /// The gateway vmnet assigns for a subnet: its first usable host.
-    ///
-    /// `192.168.64.0/24` becomes `192.168.64.1/32`. The gateway has to stay
-    /// reachable or the environment loses DHCP, DNS, and the cache proxy.
-    static func gatewayCIDR(forSubnet subnet: String) -> String? {
-        let parts = subnet.split(separator: "/")
-        guard parts.count == 2 else { return nil }
-        let octets = parts[0].split(separator: ".").compactMap { UInt32($0) }
-        guard octets.count == 4, let prefix = Int(parts[1]), prefix <= 32 else { return nil }
-        let packed = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]
-        let mask: UInt32 = prefix == 0 ? 0 : ~UInt32(0) << (32 - prefix)
-        let gateway = (packed & mask) | 1
-        return
-            "\((gateway >> 24) & 0xFF).\((gateway >> 16) & 0xFF).\((gateway >> 8) & 0xFF).\(gateway & 0xFF)/32"
-    }
-
-    /// ifconfig prints netmasks as `0xffffff00`; pf wants a prefix length.
-    static func prefixLength(fromHexNetmask hex: String) -> Int? {
-        let cleaned = hex.hasPrefix("0x") ? String(hex.dropFirst(2)) : hex
-        guard let value = UInt32(cleaned, radix: 16) else { return nil }
-        return value.nonzeroBitCount
-    }
-
-    static func networkCIDR(address: String, prefix: Int) -> String? {
-        let octets = address.split(separator: ".").compactMap { UInt32($0) }
-        guard octets.count == 4 else { return nil }
-        let packed = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]
-        let mask: UInt32 = prefix == 0 ? 0 : ~UInt32(0) << (32 - prefix)
-        let network = packed & mask
-        return
-            "\((network >> 24) & 0xFF).\((network >> 16) & 0xFF).\((network >> 8) & 0xFF).\(network & 0xFF)/\(prefix)"
-    }
 }
 
 /// Why egress filtering could not be applied.
 public enum NetworkGuardError: Error, LocalizedError, Sendable {
+    /// Filtering is switched off in config.
     case disabled
+    /// The process is not root, so pf cannot be written.
     case notRoot
+    /// Neither config nor the host offered a subnet to filter.
     case noJobNetworks
+    /// pf rejected the anchor, or a command failed.
     case loadFailed(String)
 
     /// An explanation naming the cause and, where there is one, the fix.

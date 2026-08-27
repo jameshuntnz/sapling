@@ -29,6 +29,7 @@ public struct Installer: Sendable {
             ConfigStep(options: options),
             SSHKeyStep(),
             FirewallStep(enabled: config.network.blockPrivateRanges),
+            JobNetworkStep(),
             BaseImageStep(imageName: config.macos.baseImage),
             BinaryStep(),
             LaunchDaemonStep(runAsUser: options.runAsUser),
@@ -89,6 +90,10 @@ public struct Installer: Sendable {
                 report.failed.append((step.name, reason))
                 print("  FAILED   \(step.name) — \(reason)")
                 if step is PlatformStep { return report }
+
+            case .unverified(let reason):
+                report.alreadyDone.append("\(step.name): \(reason)")
+                print("  unknown  \(step.name) — \(reason)")
             }
         }
 

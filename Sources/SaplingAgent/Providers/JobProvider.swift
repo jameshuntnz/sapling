@@ -14,6 +14,13 @@ struct JobRunRequest: Sendable {
     /// Container image for Linux jobs; ignored by the macOS provider.
     let image: String?
     let environment: [String: String]
+    /// The host cache proxy's settings, or `nil` when caching is off.
+    ///
+    /// Passed rather than resolved to an address here: which gateway a job
+    /// reaches the proxy on depends on which bridge its environment lands on,
+    /// which is not knowable until the environment exists. The environment
+    /// resolves it — see `CacheEndpoint`.
+    let cache: CacheConfig?
     let bootTimeout: Duration
     let jobTimeout: Duration
 
@@ -25,6 +32,7 @@ struct JobRunRequest: Sendable {
         labels: [String],
         image: String? = nil,
         environment: [String: String] = [:],
+        cache: CacheConfig? = nil,
         bootTimeout: Duration = .seconds(300),
         jobTimeout: Duration = .seconds(7200)
     ) {
@@ -35,6 +43,7 @@ struct JobRunRequest: Sendable {
         self.labels = labels
         self.image = image
         self.environment = environment
+        self.cache = cache
         self.bootTimeout = bootTimeout
         self.jobTimeout = jobTimeout
     }

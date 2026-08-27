@@ -66,7 +66,13 @@ extension NodeAgent {
                 jitConfig: jitConfig,
                 labels: labels,
                 image: image,
-                environment: await jobEnvironment(for: job.platform),
+                // Cache settings are not passed as variables. They used to be,
+                // resolved against `interfaces.first.address` — whichever
+                // bridge came up first — so a container on `192.168.64.x` and
+                // a VM on `192.168.65.x` could not both be right, and which
+                // platform got a working cache was decided by boot order. The
+                // environment resolves its own gateway; see `CacheEndpoint`.
+                cache: config.cache.enabled ? config.cache : nil,
                 bootTimeout: .seconds(config.macos.bootTimeoutSeconds),
                 jobTimeout: .seconds(
                     job.platform == .macos ? config.macos.jobTimeoutSeconds : config.linux.jobTimeoutSeconds)
@@ -175,31 +181,6 @@ extension NodeAgent {
         }
     }
 
-    func jobEnvironment(for platform: JobPlatform) async -> [String: String] {
-        guard config.cache.enabled else { return [:] }
-        // Jobs reach the host through the bridge gateway; the cache proxy
-        // binds there, and it's the one private address they're allowed.
-        guard let gateway = await cacheGatewayHint() else { return [:] }
-        let base = "http://\(gateway):\(config.cache.port)"
-        var env: [String: String] = [:]
-        if config.cache.proxies.contains("go") {
-            env["GOPROXY"] = "\(base)/go,direct"
-            env["GOSUMDB"] = "sum.golang.org"
-        }
-        if config.cache.proxies.contains("cargo") {
-            env["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"] = "sparse"
-            env["SAPLING_CARGO_MIRROR"] = "\(base)/cargo"
-        }
-        if config.cache.proxies.contains("npm") {
-            env["NPM_CONFIG_REGISTRY"] = "\(base)/npm"
-        }
-        return env
-    }
-
-    func cacheGatewayHint() async -> String? {
-        let interfaces = try? await NetworkGuard.discoverBridgeInterfaces()
-        return interfaces?.first?.address
-    }
 }
 
 extension NodeAgent {

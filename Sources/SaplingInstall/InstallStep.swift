@@ -11,6 +11,15 @@ public enum StepState: Sendable {
     case manual(String, instructions: String)
     /// Present but broken.
     case failed(String)
+    /// Could not be checked, with the reason.
+    ///
+    /// Its own case because the alternative is lying. `pfctl -sr` needs root
+    /// and the CLI is not, so the egress-filter step used to print `ok` —
+    /// "anchor wired; rules are written when the first job starts" — whether
+    /// the rules were loaded, absent, or unreadable. It said that throughout
+    /// an outage. Reporting green on an unknown is worse than reporting
+    /// nothing, and this does not count as a problem to fix.
+    case unverified(String)
 
     /// Whether the step needs no further action.
     public var isOK: Bool { if case .ok = self { true } else { false } }
@@ -18,7 +27,7 @@ public enum StepState: Sendable {
     /// One-line description of the state, for printing.
     public var summary: String {
         switch self {
-        case .ok(let text), .fixable(let text), .failed(let text):
+        case .ok(let text), .fixable(let text), .failed(let text), .unverified(let text):
             text
         case .manual(let text, _):
             text

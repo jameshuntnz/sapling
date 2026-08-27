@@ -73,6 +73,13 @@ struct ContainerProvider: JobProvider, Sendable {
             return outcome
         } catch {
             await Self.teardown(name: name, events: events)
+            // Teardown first: the repair stops every container, and this one
+            // is on its way out anyway. Without the repair the next Linux job
+            // starts into the same dead bridge and fails the same way, which
+            // is how a single lost bridge became an evening of failures.
+            if error is JobNetworkLost {
+                await Self.repairNetwork(after: name, events: events)
+            }
             throw error
         }
     }
@@ -123,6 +130,13 @@ struct ContainerProvider: JobProvider, Sendable {
                 try await Task.sleep(for: request.jobTimeout)
                 return nil
             }
+            // Races the job for its whole duration. The container that failed
+            // here passed its egress check, compiled a module, and then went
+            // quiet — its bridge had gone, which nothing was watching for.
+            group.addTask {
+                let address = await Self.address(ofContainer: name, within: Self.addressTimeout)
+                throw JobNetworkLost(reason: try await JobNetwork.awaitLoss(of: address))
+            }
 
             guard let first = try await group.next() else { return Int32(-1) }
             group.cancelAll()
@@ -138,8 +152,7 @@ struct ContainerProvider: JobProvider, Sendable {
             // brings the host-side gateway back. Done here rather than in
             // preflight because the bridge only exists while a container runs —
             // there is nothing to inspect before one starts.
-            await events.log("egress check failed; restarting the container system")
-            await Self.restartContainerSystem()
+            await Self.repairNetwork(after: name, events: events)
             throw ProviderError(EgressCheck.failureReason)
         }
 
@@ -169,21 +182,6 @@ struct ContainerProvider: JobProvider, Sendable {
         return args
     }
 
-    /// Restarts Apple's `container` service, recreating its network.
-    ///
-    /// `container system status` reports "running" for a system whose bridge
-    /// has gone, so this is not conditional on any status it reports — the
-    /// egress probe failing is the only evidence worth acting on.
-    static func restartContainerSystem() async {
-        for arguments in [["system", "stop"], ["system", "start"]] {
-            guard let command = try? await SessionCommand.invocation("container", arguments) else {
-                return
-            }
-            _ = try? await ProcessRunner.run(
-                command.executable, command.arguments, timeout: .seconds(120))
-        }
-    }
-
     /// The actions-runner image ships `run.sh` in the runner's home.
     ///
     /// Falling back to a download keeps a plain `ubuntu:latest` usable as an
@@ -192,6 +190,7 @@ struct ContainerProvider: JobProvider, Sendable {
         """
         set -euo pipefail
         \(EgressCheck.probeScript)
+        \(CacheEndpoint.exportScript(cache: request.cache, platform: .linux))
         if [ -x /home/runner/run.sh ]; then
           cd /home/runner
         elif [ -x ./run.sh ]; then
@@ -232,25 +231,11 @@ struct ContainerProvider: JobProvider, Sendable {
     }
 
     func reapOrphans() async -> [String] {
-        guard
-            let command = try? await SessionCommand.invocation(
-                "container", ["list", "--all", "--format", "json"]),
-            let result = try? await ProcessRunner.run(command.executable, command.arguments),
-            result.succeeded,
-            let data = result.stdout.data(using: .utf8),
-            let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else {
-            return []
-        }
         var reaped: [String] = []
-        for entry in entries {
-            let name =
-                (entry["name"] as? String)
-                ?? (entry["id"] as? String)
-                ?? ((entry["configuration"] as? [String: Any])?["id"] as? String)
-            guard let name, name.hasPrefix(Self.containerPrefix) else { continue }
-            await Self.forceTeardown(name: name)
-            reaped.append(name)
+        for container in await ContainerListing.current(includeStopped: true)
+        where container.id.hasPrefix(Self.containerPrefix) {
+            await Self.forceTeardown(name: container.id)
+            reaped.append(container.id)
         }
         return reaped
     }

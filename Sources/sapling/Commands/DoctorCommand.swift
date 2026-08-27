@@ -15,6 +15,7 @@ struct Doctor: AsyncParsableCommand {
 
         let results = await Installer().doctor()
         var problems = 0
+        var unverified = 0
 
         for result in results {
             switch result.state {
@@ -29,6 +30,12 @@ struct Doctor: AsyncParsableCommand {
             case .failed(let reason):
                 problems += 1
                 print("  \(Style.red("failed"))   \(Format.pad(result.step, to: 20)) \(reason)")
+            case .unverified(let reason):
+                // Not counted as a problem: the check could not run, which is
+                // not the same as something being wrong. Saying so plainly is
+                // the whole point of this case.
+                unverified += 1
+                print("  \(Style.dim("unknown"))  \(Format.pad(result.step, to: 20)) \(reason)")
             }
         }
 
@@ -44,6 +51,12 @@ struct Doctor: AsyncParsableCommand {
         guard problems == 0 else {
             print("\(problems) item(s) need attention. `sudo sapling install` fixes what it can.")
             throw ExitCode.failure
+        }
+        guard unverified == 0 else {
+            print(
+                Style.green("Everything that could be checked is fine")
+                    + ", but \(unverified) check(s) could not run here.")
+            return
         }
         print(Style.green("Everything checks out."))
     }

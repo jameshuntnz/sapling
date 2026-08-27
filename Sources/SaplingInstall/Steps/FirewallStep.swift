@@ -37,13 +37,16 @@ public struct FirewallStep: InstallStep {
         guard FileManager.default.fileExists(atPath: NetworkGuard.anchorPath) else {
             return .fixable("anchor file \(NetworkGuard.anchorPath) is missing")
         }
-        let (loaded, rules) = await NetworkGuard.verify()
-        if loaded {
+        switch await NetworkGuard.verify() {
+        case .loaded(let rules):
             return .ok("anchor loaded, \(rules.count) rule(s) active")
+        case .empty:
+            // Expected before the first job: the anchor is wired but empty
+            // until a bridge interface exists to write rules about.
+            return .ok("anchor wired and empty; rules are written when the first job starts")
+        case .unverifiable(let reason):
+            return .unverified("\(Self.pfConfPath) loads the anchor, but \(reason)")
         }
-        // Expected before the first job: the anchor is wired but empty until
-        // a bridge interface exists to write rules about.
-        return .ok("anchor wired; rules are written when the first job starts")
     }
 
     /// Installs or configures the pf anchor that keeps jobs off your LAN.

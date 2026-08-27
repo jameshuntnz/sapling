@@ -45,11 +45,19 @@ struct NetworkGuardEnforcementTests {
 
     /// An anchor that exists but carries no block rule looks configured and
     /// protects nothing — that must read as "not loaded".
-    @Test("verify treats a ruleless anchor as unprotected")
+    ///
+    /// And an anchor nobody could read must read as neither: reporting `ok`
+    /// on an unknown is what let `doctor` say the filter was fine throughout
+    /// an outage.
+    @Test("verify never reports a filter it could not read as loaded")
     func verifyRequiresABlockRule() async {
-        let (loaded, _) = await NetworkGuard.verify()
-        // No sapling anchor is installed on a dev machine.
-        #expect(!loaded)
+        let state = await NetworkGuard.verify()
+        // No sapling anchor is installed on a dev machine, and as a non-root
+        // test process pfctl cannot be read at all.
+        #expect(!state.isLoaded)
+        if getuid() != 0, case .unverifiable(let reason) = state {
+            #expect(reason.contains("root"))
+        }
     }
 
     @Test("extra blocked and allowed ranges come from config")
@@ -108,7 +116,7 @@ struct NetworkGuardReloadTests {
     @Test("derives a gateway for every declared subnet")
     func gatewayPerSubnet() {
         let subnets = NetworkConfig().jobSubnets
-        let gateways = subnets.compactMap(NetworkGuard.gatewayCIDR(forSubnet:))
+        let gateways = subnets.compactMap(BridgeTable.gatewayCIDR(forSubnet:))
         #expect(gateways.count == subnets.count)
         #expect(gateways.contains("192.168.64.1/32"))
         #expect(gateways.contains("192.168.65.1/32"))
@@ -146,7 +154,7 @@ struct JobSubnetCoverageTests {
     @Test("every covered subnet gets a reachable gateway")
     func everySubnetHasAGateway() {
         let effective = Set(["10.99.0.0/24"]).union(NetworkConfig.defaultJobSubnets)
-        let gateways = effective.compactMap(NetworkGuard.gatewayCIDR(forSubnet:))
+        let gateways = effective.compactMap(BridgeTable.gatewayCIDR(forSubnet:))
         #expect(gateways.count == effective.count)
         #expect(gateways.contains("10.99.0.1/32"))
     }
@@ -162,7 +170,7 @@ struct GatewayExclusionTests {
     /// Mirrors how the anchor's jobnets table is built.
     func entries(for subnets: [String]) -> [String] {
         subnets.flatMap { subnet -> [String] in
-            guard let gateway = NetworkGuard.gatewayCIDR(forSubnet: subnet) else { return [subnet] }
+            guard let gateway = BridgeTable.gatewayCIDR(forSubnet: subnet) else { return [subnet] }
             return [subnet, "!\(gateway.replacingOccurrences(of: "/32", with: ""))"]
         }
     }
@@ -179,7 +187,7 @@ struct GatewayExclusionTests {
     func hostIsNotAJob() {
         let built = entries(for: NetworkConfig.defaultJobSubnets)
         for subnet in NetworkConfig.defaultJobSubnets {
-            let gateway = NetworkGuard.gatewayCIDR(forSubnet: subnet)!
+            let gateway = BridgeTable.gatewayCIDR(forSubnet: subnet)!
                 .replacingOccurrences(of: "/32", with: "")
             #expect(built.contains("!\(gateway)"), "\(gateway) must be excluded")
         }

@@ -24,7 +24,7 @@ struct BridgeParsingTests {
 
     @Test("finds only bridge interfaces, with their network CIDRs")
     func findsBridges() {
-        let interfaces = NetworkGuard.parseInterfaces(from: Self.sample)
+        let interfaces = BridgeTable.parse(ifconfig: Self.sample)
         #expect(interfaces.map(\.name) == ["bridge100", "bridge101"])
         #expect(interfaces.map(\.subnet) == ["192.168.64.0/24", "192.168.65.0/24"])
         // The gateway address itself, which becomes the "allowed" entry.
@@ -36,7 +36,7 @@ struct BridgeParsingTests {
     /// meant to contain them.
     @Test("ignores the host's LAN, loopback, and tailnet interfaces")
     func ignoresNonBridges() {
-        let interfaces = NetworkGuard.parseInterfaces(from: Self.sample)
+        let interfaces = BridgeTable.parse(ifconfig: Self.sample)
         #expect(!interfaces.contains { $0.address == "192.168.1.42" })
         #expect(!interfaces.contains { $0.address == "127.0.0.1" })
         #expect(!interfaces.contains { $0.address == "100.101.102.103" })
@@ -48,7 +48,7 @@ struct BridgeParsingTests {
             lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
             \tinet 127.0.0.1 netmask 0xff000000
             """
-        #expect(NetworkGuard.parseInterfaces(from: output).isEmpty)
+        #expect(BridgeTable.parse(ifconfig: output).isEmpty)
     }
 
     @Test("skips a bridge that is up but has no address yet")
@@ -58,6 +58,6 @@ struct BridgeParsingTests {
             \tConfiguration:
             \t\tid 0:0:0:0:0:0 priority 0
             """
-        #expect(NetworkGuard.parseInterfaces(from: output).isEmpty)
+        #expect(BridgeTable.parse(ifconfig: output).isEmpty)
     }
 }

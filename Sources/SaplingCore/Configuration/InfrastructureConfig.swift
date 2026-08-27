@@ -66,6 +66,13 @@ public struct NetworkConfig: Codable, Sendable {
 
 /// The `[cache]` section: the host-side pull-through package caches.
 public struct CacheConfig: Codable, Sendable {
+    /// Path the proxy answers on to prove it is listening on an address.
+    ///
+    /// A job environment resolves its own gateway and asks here before
+    /// exporting any cache variables: a `GOPROXY` pointing at an address
+    /// nothing answers on is worse than no `GOPROXY` at all.
+    public static let healthPath = "_sapling/health"
+
     /// Whether to run the cache proxy at all.
     public var enabled: Bool
     /// Port the cache proxy listens on, bound to the VM bridge gateway.

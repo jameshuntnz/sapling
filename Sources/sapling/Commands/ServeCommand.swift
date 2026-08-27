@@ -66,33 +66,14 @@ struct Serve: AsyncParsableCommand {
         await agent.stop()
     }
 
-    /// The cache proxy binds to the VM bridge gateway, which only exists once
-    /// something has run.
+    /// The cache proxy listens on the bridge gateways, which exist only while
+    /// job environments are running.
     ///
-    /// Rather than fail at startup on a cold boot, wait for it in the background
-    /// and bind when it appears.
+    /// A supervisor rather than a single bind: there are usually two gateways,
+    /// one per platform, and they come and go with the jobs on them.
     private func startCacheProxy(config: CacheConfig) {
         Task.detached {
-            let server = CacheProxyServer(config: config)
-            for attempt in 0..<60 {
-                if let interfaces = try? await NetworkGuard.discoverBridgeInterfaces(),
-                    let gateway = interfaces.first?.address
-                {
-                    do {
-                        try await server.run(bindAddress: gateway)
-                    } catch {
-                        Log.error("cache proxy stopped: \(error.localizedDescription)")
-                    }
-                    return
-                }
-                if attempt == 0 {
-                    Log.info("cache proxy waiting for a VM bridge interface to appear")
-                }
-                try? await Task.sleep(for: .seconds(30))
-            }
-            Log.warn(
-                "no VM bridge interface appeared; cache proxy not started (jobs will fetch packages directly)"
-            )
+            await CacheProxySupervisor(config: config).run()
         }
 
         Task.detached {
