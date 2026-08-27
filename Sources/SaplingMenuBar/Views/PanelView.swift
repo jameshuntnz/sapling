@@ -110,6 +110,27 @@ struct PanelView: View {
         .padding(.vertical, 10)
     }
 
+    /// What the node is running.
+    ///
+    /// Deliberately not compared against this app's own version. The source
+    /// placeholder only moves on a stable release, so an app built from main —
+    /// which is how the README says to install it — reports that placeholder
+    /// while the node runs dev builds. Flagging that as a mismatch would be
+    /// orange permanently, which is noise rather than signal.
+    ///
+    /// Build metadata is dropped for width; the tooltip carries it, since the
+    /// commit is the part you want when asking why a node behaves oddly.
+    @ViewBuilder
+    private var nodeVersion: some View {
+        if let version = model.status?.version {
+            Text(SemanticVersion(version)?.withoutBuildMetadata ?? version)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .help("Node is running \(version).")
+        }
+    }
+
     private func jobSection(title: String, jobs: [Job], emptyText: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             SectionHeader(title: title, trailing: jobs.isEmpty ? nil : "\(jobs.count)")
@@ -152,6 +173,8 @@ struct PanelView: View {
             }
 
             Spacer()
+
+            nodeVersion
 
             if let updated = model.lastUpdated {
                 Text(updated.relativeDescription)

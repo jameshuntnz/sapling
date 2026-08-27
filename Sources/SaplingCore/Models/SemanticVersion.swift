@@ -168,6 +168,19 @@ public struct SemanticVersion: Sendable, Hashable, Comparable, CustomStringConve
         return text
     }
 
+    /// The version without build metadata, for display where space is short.
+    ///
+    /// Build metadata takes no part in precedence (§10), so dropping it never
+    /// merges two versions that are actually different — and `0.2.0-dev.19`
+    /// fits in a menu bar panel where `0.2.0-dev.19+595aac7` does not.
+    public var withoutBuildMetadata: String {
+        var text = "\(major).\(minor).\(patch)"
+        if !prerelease.isEmpty {
+            text += "-" + prerelease.map(\.description).joined(separator: ".")
+        }
+        return text
+    }
+
     /// Compares by semver §11 precedence.
     ///
     /// Build metadata takes no part, as the spec requires.

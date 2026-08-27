@@ -157,4 +157,16 @@ struct UpdateConfirmationTests {
         let expected = try #require(SemanticVersion("0.1.1-dev.2"))
         #expect(installed != expected)
     }
+
+    /// A commit hash is the part of a version that will not fit in the panel.
+    ///
+    /// Dropping it is safe because §10 excludes build metadata from
+    /// precedence — two versions differing only there are the same release.
+    @Test("build metadata is dropped for display but nothing else is")
+    func withoutBuildMetadata() throws {
+        #expect(SemanticVersion("0.2.0-dev.19+595aac7")?.withoutBuildMetadata == "0.2.0-dev.19")
+        #expect(SemanticVersion("0.2.0+abc")?.withoutBuildMetadata == "0.2.0")
+        #expect(SemanticVersion("0.2.0-rc.1")?.withoutBuildMetadata == "0.2.0-rc.1")
+        #expect(SemanticVersion("1.4.2")?.withoutBuildMetadata == "1.4.2")
+    }
 }
