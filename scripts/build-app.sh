@@ -59,7 +59,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       the daemon's address is configured by the user at runtime, so a domain
       exception cannot be declared ahead of time. Hence a blanket allowance.
 
-      This is why `sapling status` worked while the app could not connect: a
+      This is why "sapling status" worked while the app could not connect: a
       bare executable is not subject to ATS, an app bundle is.
     -->
     <key>NSAppTransportSecurity</key>
