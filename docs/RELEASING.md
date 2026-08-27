@@ -1,162 +1,197 @@
 # Releasing and updating
 
-Commit messages drive versions, versions drive releases, and nodes pull
-releases themselves. Nobody types a version number, and updating a node needs
-no `sudo`.
+How a change gets from a commit to a running node.
+
+Two halves that meet at a GitHub Release: the **release pipeline** builds and
+publishes; the **node updates itself** from what was published. Neither needs
+`sudo`, and neither needs you to touch the mini.
 
 ---
 
-## Commit messages
+## Commit messages decide the version
 
-[Conventional Commits](https://www.conventionalcommits.org). The type prefix
-decides the version bump, so it is the one part of a message that has to be
-mechanical.
+Conventional commits, read by `scripts/next-version.sh`:
 
-```
-<type>[optional scope][!]: <subject>
-
-[body]
-
-[BREAKING CHANGE: description]
-```
-
-| Type | Bump | Use for |
+| Prefix | Bump | Example |
 |---|---|---|
-| `feat` | minor | New behaviour |
-| `fix` | patch | A defect |
-| `perf` | patch | Something measurably faster |
-| `refactor` | none | Restructuring with no behaviour change |
-| `docs`, `test`, `chore`, `ci`, `build`, `style` | none | Everything else |
+| `feat:` | minor | `feat: show node metrics in the menu bar` |
+| `fix:` `perf:` | patch | `fix: stop the daemon deleting its base image` |
+| `feat!:` or `BREAKING CHANGE:` in the body | major | see the 0.x note below |
+| `docs:` `test:` `chore:` `refactor:` `ci:` `style:` | **none** | a release with only these publishes nothing |
 
-A `!` before the colon, or a `BREAKING CHANGE:` paragraph in the body, forces a
-major bump.
+Scopes are fine: `fix(agent): …` counts the same as `fix: …`.
 
-```
-feat(agent): re-offer jobs that failed locally
-fix: stop the daemon deleting its own base image
-perf(cache): stream release assets instead of buffering
-refactor!: rename the job event schema
+**While the version is 0.x, a breaking change bumps the minor**, not to 1.0.
+Reaching 1.0 should be a decision someone makes, not something a commit message
+does by accident.
 
-BREAKING CHANGE: `runs.event` values are now namespaced.
-```
-
-**While the version is 0.x, a breaking change bumps the minor** rather than
-going to 1.0. Reaching 1.0 should be a decision, not the side effect of a
-comment on a commit.
-
-Only `feat`, `fix` and `perf` produce a release. A run of `docs` and `chore`
-commits publishes nothing, which is the intent — not every push deserves a
-version.
-
----
+`scripts/test-next-version.sh` exercises this against throwaway repositories,
+and runs in CI.
 
 ## Channels
 
-Three streams, distinguished by the version itself rather than tracked
-separately, so a version string always says what it is.
+A version says which channel it belongs to, so nothing has to be tracked
+separately:
 
-| Channel | Looks like | Published |
+| Channel | Looks like | Cut from |
 |---|---|---|
-| `dev` | `0.5.0-dev.12+a1b2c3d` | Automatically, on every push to `main` |
-| `rc` | `0.5.0-rc.1` | On request, when a version looks ready |
-| `stable` | `0.5.0` | On request, when it is ready |
+| `dev` | `0.2.0-dev.7+a1b2c3d` | main, whenever you want a build |
+| `rc` | `0.2.0-rc.1` | main, when a version looks ready |
+| `stable` | `0.2.0` | a candidate you're happy with |
+| `hotfix` | `0.1.1` | a release branch, to ship a fix without dragging in main |
 
-A node follows one channel and takes anything **at least as finished** as it:
-`dev` accepts dev, rc and stable; `stable` accepts only stable. That ordering
-is what stops a production node ever installing a development build, and it is
-derived from the version, so a release mislabelled in GitHub's UI cannot
-override it.
+Ordering follows semver, which matters more than it looks:
 
-Set it per node:
-
-```toml
-[update]
-channel = "stable"    # stable | rc | dev
+```
+0.2.0-dev.7  <  0.2.0-rc.1  <  0.2.0  <  0.2.1-dev.1
 ```
 
-## Publishing
+A prerelease precedes the release it leads to. So a node on `0.2.0` will not
+take `0.2.0-dev.9` — correctly, that build is *older*. `SemanticVersionTests`
+covers this against the spec's own worked example.
 
-**Dev builds** need nothing — every push to `main` with a `feat`, `fix` or
-`perf` commit publishes one.
+## Cutting a release
 
-**Release candidates and releases** are deliberate. Run the *Release* workflow
-and pick a channel:
+Releases are deliberate. Pushing to `main` runs CI and publishes nothing.
+
+**Actions → Release → Run workflow**, and pick a channel. Or:
 
 ```bash
-gh workflow run release.yml -f channel=rc
 gh workflow run release.yml -f channel=stable
 ```
 
-Each run verifies before it publishes — lint, file sizes, the version-derivation
-tests and the full suite — so a release that does not pass its own checks never
-gets a tag.
+The pipeline then:
 
-Only a `stable` release writes the version back into the source. Dev versions
-are derived, and committing one per push would both spam `main` and re-trigger
-the workflow.
+1. **Works out the version** from commits since the last tag. If nothing
+   warrants a release it stops here and says so.
+2. **Verifies** — workflows, lint, file sizes, version derivation, the full
+   test suite. Nothing is published that hasn't passed its own checks.
+3. **Stamps the version** into `SaplingVersion.current`.
+4. **Builds and packages** `sapling-<version>-macos-arm64.tar.gz` plus
+   `SHA256SUMS`.
+5. **Tags**, and for a stable release commits the version stamp to `main`.
+6. **Publishes** the GitHub Release, marked prerelease for anything but
+   stable and hotfix.
 
-**Hotfixes** patch an existing release without dragging in whatever has landed
-on `main` since. Branch from the tag, commit the fix, and publish:
+It runs on the node itself, so Sapling builds and releases Sapling.
 
-```bash
-git checkout -b release/0.4.x v0.4.0
-git cherry-pick <the fix>
-gh workflow run release.yml --ref release/0.4.x -f channel=hotfix
-```
-
-`hotfix` bumps the patch of the last release reachable from that branch and
-ignores everything else, so `v0.4.0` becomes `v0.4.1` even if `main` is well
-past it.
+**Tags carry no build metadata.** A dev version is `0.2.0-dev.7+a1b2c3d`, but
+its tag is `v0.2.0-dev.7`. `+` is literal in a URL path and a space in a query
+string — a good way to lose a release. Semver ignores build metadata for
+precedence, so nothing that matters is lost, and the binary still reports the
+commit it came from.
 
 ---
 
-## Updating a node
-
-From anywhere on the tailnet:
-
-```bash
-sapling update --check    # report what's available
-sapling update            # install it
-```
-
-**No `sudo`.** The daemon already runs as root, so the CLI asks *it* to update
-itself: it downloads the release, verifies it, replaces its own binary and
-restarts. Asking a person to do that means a password prompt for every deploy,
-which during the first node bring-up meant about ten of them.
-
-An update is refused while jobs are running, because restarting the daemon
-fails every job in flight and reaps its VM. `--force` overrides that when you
-mean it.
-
-To let a node update itself:
+## How a node updates
 
 ```toml
 [update]
-auto_apply = true
+repository = "jameshuntnz/sapling"
+channel = "dev"              # dev | rc | stable
 check_interval_hours = 6
+auto_apply = false
 ```
 
-Even then it only applies while the node is idle.
+A node on `dev` accepts rc and stable builds too — they are further along the
+same line. A node on `stable` takes only finished releases.
 
-### What the update trusts
+### Updating
 
-The daemon downloads a binary and runs it as root, so the download is the
-security boundary. Three things guard it:
+```bash
+sapling update --check     # what's available
+sapling update             # install it
+```
 
-- the release is fetched over HTTPS, from the configured repository only
-- the archive is checked against the `SHA256SUMS` published beside it
-- a release with no checksums is **refused**, not installed unverified
+**No `sudo`.** The daemon already runs as root, so it does the work itself:
+the CLI is only asking. That is the whole reason updating stopped being a
+chore.
 
-What that does *not* cover: the checksums come from the same place as the
-archive, so this catches corruption and interrupted downloads, not a
-compromised repository. **Code signing with a Developer ID would close that
-gap** and is the obvious next step.
+What the daemon does, in order:
 
-The previous binary is kept at `/usr/local/bin/sapling.previous`, so a bad
-update can be backed out by hand.
+1. **Refuses if jobs are running** — a restart marks every in-flight job failed
+   and reaps its VM. `--force` overrides.
+2. **Downloads** the archive and `SHA256SUMS` from the release.
+3. **Verifies** the archive against the published checksum. A mismatch stops
+   here.
+4. **Unpacks** and checks there is a runnable binary inside.
+5. **Swaps the binary**, moving the old one to
+   `/usr/local/bin/sapling.previous` rather than overwriting it — writing over
+   a running executable gives you `Text file busy`. If the copy fails, the old
+   binary is moved back, so a failed update leaves a node that still starts.
+6. **Restarts** via `launchctl kickstart`.
 
-### Private repository
+The CLI then waits for the daemon to come back and reports the version it is
+actually running — worth doing rather than assuming, because a failed restart
+leaves the node down and you should hear that from the tool rather than from a
+job that never ran.
 
-Sapling's repository is private, so reading releases needs authentication. The
-GitHub App needs **`Contents: Read-only`** in addition to the permissions job
-polling uses — without it, update checks fail with a 404 that says so.
+### When it says "up to date" and you disagree
+
+Almost always semver being right. Check what the node thinks it is:
+
+```bash
+sapling update --check
+```
+
+If the running version *outranks* everything published — a locally built
+binary, or a version stamp that got ahead — then nothing published is an
+upgrade, and that is the correct answer to the question asked. To install the
+newest release anyway:
+
+```bash
+sapling update --force
+```
+
+The development placeholder is `0.0.0-dev` precisely so this doesn't happen: a
+locally built binary sorts below every release. It was `0.1.0` once, which is a
+*stable* version, and a node running it refused every `0.1.0-dev.N` release as
+a downgrade.
+
+### Recovering a bad update
+
+The previous binary is kept:
+
+```bash
+ssh -t <node> 'sudo /usr/local/bin/sapling.previous upgrade --binary /usr/local/bin/sapling.previous'
+```
+
+That reinstalls the old version and restarts. `sapling doctor` afterwards.
+
+---
+
+## Which workflow runs when
+
+| Event | Workflow | Publishes |
+|---|---|---|
+| push to `main` | CI — workflows, lint, sizes, build, test | no |
+| pull request | CI | no |
+| **Actions → Release** | Release — verify, build, tag, publish | **yes** |
+| Actions → Verify node | the hardware checks in [TESTING.md](TESTING.md) | no |
+
+CI and Release deliberately never run together. They did once, on every push,
+and since each boots a macOS VM and there are only two slots, every push queued
+behind itself for the better part of ten minutes.
+
+**There is no build cache, on purpose.** It was measured and made things worse:
+restoring 919MB costs ~130s and *saving* it ~185s, against a full build of
+~140s. See [AUTOMATION-GAPS.md](AUTOMATION-GAPS.md) for the version of this
+that would actually help — a cache on the host, mounted into the VM, rather
+than one crossing the network.
+
+## Release checklist
+
+For anything reaching a node you care about:
+
+- [ ] `make check` passes locally
+- [ ] CI green on `main`
+- [ ] Dispatch **rc** first if the change touches provisioning, the egress
+      filter, or the update path itself — those fail in ways that are hard to
+      see from the outside
+- [ ] Point a node at `rc`, or `sapling update` one you can afford to break
+- [ ] Run **Verify node** ([TESTING.md](TESTING.md) phases 2–5), especially the
+      egress checks
+- [ ] Dispatch **stable**
+
+The egress test is the one worth the extra minutes. It has caught the filter
+silently doing nothing twice, and both times everything else looked healthy.

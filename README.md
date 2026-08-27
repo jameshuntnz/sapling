@@ -115,6 +115,9 @@ sapling nodes              List nodes.
 sapling nodes join-token   Generate an enrollment token.
 sapling drain              Stop accepting new jobs, wait for running ones.
 sapling cordon / uncordon  Pause / resume job acceptance.
+
+sapling update             Install the newest release on the node's channel.
+sapling update --check     Report what's available without installing it.
 ```
 
 Every command that talks to the API accepts `--server`, and otherwise resolves in order: `$SAPLING_SERVER`, `~/.sapling/client.toml`, the local daemon's own config, loopback.
@@ -228,6 +231,27 @@ sapling update
 
 See [docs/RELEASING.md](docs/RELEASING.md) for channels, hotfixes, and what the
 update mechanism does and doesn't verify.
+
+## Releasing and updating
+
+Push to `main` and CI verifies it; nothing is published. Releases are
+dispatched deliberately from **Actions → Release**, where you pick a channel —
+`dev`, `rc`, `stable` or `hotfix`. Commit messages decide the version:
+`feat:` bumps the minor, `fix:` and `perf:` the patch, and everything else
+publishes nothing.
+
+Nodes update themselves:
+
+```bash
+sapling update
+```
+
+No `sudo` — the daemon already runs as root, so it downloads, verifies against
+the published checksum, swaps its own binary and restarts. It refuses while
+jobs are running, and keeps the previous binary so a bad update can be undone.
+
+[docs/RELEASING.md](docs/RELEASING.md) covers the version rules, the channel
+ordering that decides what a node will accept, and how to recover a bad update.
 
 ## Picking up the work
 
