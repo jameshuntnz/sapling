@@ -249,5 +249,13 @@ public enum SaplingJSON {
 /// The version this build reports.
 public enum SaplingVersion {
     /// Semantic version string, surfaced by `--version` and `GET /status`.
-    public static let current = "0.1.0"
+    ///
+    /// A development placeholder, replaced by the release pipeline when a
+    /// version is cut. It sorts below every published release deliberately:
+    /// a locally-built binary must never look newer than a real one, or a node
+    /// running a working build refuses every update as a downgrade. The first
+    /// attempt used "0.1.0", which is a *stable* version, so every
+    /// `0.1.0-dev.N` release read as older and the node sat there reporting
+    /// itself up to date.
+    public static let current = "0.0.0-dev"
 }
