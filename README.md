@@ -310,10 +310,11 @@ Three more decisions came up during implementation and are documented where they
 ## Releasing
 
 Commit messages drive versions. `feat:` bumps the minor, `fix:`/`perf:` the
-patch, `!` or `BREAKING CHANGE:` the major — and every push to `main` publishes
-a dev build automatically. Release candidates and releases are deliberate:
+patch, `!` or `BREAKING CHANGE:` the major. Publishing is always deliberate —
+a push to `main` runs CI and nothing else:
 
 ```bash
+gh workflow run release.yml -f channel=dev      # what a node's `sapling update` picks up
 gh workflow run release.yml -f channel=stable
 ```
 
