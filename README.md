@@ -13,7 +13,7 @@ Single-node today. The control plane, the `nodes` table, and the enrollment endp
 - **macOS jobs** run in a fresh Tart VM cloned from a base image, registered as an ephemeral runner, and deleted when the job ends. The VM *is* the isolation boundary.
 - **Linux jobs** run in an Apple `container` — VM-per-container, sub-second boot, near-zero idle memory. Chosen over Docker/Colima specifically to keep idle RAM low on a 16GB box.
 - **Slot accounting** respects Apple's hard limit of two concurrent macOS VMs. The config value is advisory; the scheduler always uses the clamped one.
-- **Egress is default-deny to private address space.** A job can reach the internet and nothing else — not your LAN, not your router, not your tailnet, not the rest of what this Mac hosts.
+- **Egress is default-deny to private address space.** A job can reach the internet and nothing else — not your LAN, not your router, not your tailnet, not the rest of what this Mac hosts. Every environment then has to *prove* it can reach GitHub before a runner starts in it, because the job network is built on demand and can be broken in ways nothing else reports.
 - **Caching happens on the host**, through pull-through proxies, so nothing job-specific has to survive between runs for builds to stay fast.
 - **Monitoring** is a native menu bar app over Tailscale, plus a CLI. Both are thin clients against the same REST API; neither contains orchestration logic.
 

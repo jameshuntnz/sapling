@@ -137,6 +137,48 @@ struct ProviderTests {
         }
     }
 
+    /// A distinct status is the whole point: without one, "this environment
+    /// has no network" is indistinguishable from a build that failed on its
+    /// own merits, and the operator is told the wrong thing.
+    @Test("an environment with no egress is distinguishable from a failed build")
+    func egressFailureIsItsOwnStatus() {
+        #expect(EgressCheck.isEgressFailure(EgressCheck.failureStatus))
+        #expect(!EgressCheck.isEgressFailure(0))
+        #expect(!EgressCheck.isEgressFailure(1))
+        // The statuses a real build fails with must not be mistaken for it.
+        for status in Int32(1)...Int32(10) {
+            #expect(!EgressCheck.isEgressFailure(status))
+        }
+    }
+
+    /// The probe is spliced into both a Linux container script and a macOS VM's
+    /// shell, so it may only use what exists in both — `curl` does, `getent`
+    /// and `ip` do not, and the latter was already misread once as a missing
+    /// route when it was simply absent from the image.
+    @Test("the egress probe uses only what a container and a VM both have")
+    func probeIsPortable() {
+        let script = EgressCheck.probeScript
+        #expect(script.contains("curl"))
+        #expect(script.contains(EgressCheck.probeURL))
+        #expect(script.contains("exit \(EgressCheck.failureStatus)"))
+
+        for absent in ["getent", "ip route", "ip addr", "hostname -I", "ping "] {
+            #expect(!script.contains(absent), "probe must not depend on \(absent)")
+        }
+    }
+
+    /// The failure has to name the cause rather than the symptom.
+    ///
+    /// "Lost communication with the server" is what the runner says, and it
+    /// sent us looking at pf for an hour when the bridge was simply gone.
+    @Test("the egress failure reason names the cause, not the symptom")
+    func failureReasonIsActionable() {
+        let reason = EgressCheck.failureReason
+        #expect(reason.contains("could not reach"))
+        #expect(reason.contains("bridge"))
+        #expect(!reason.isEmpty)
+    }
+
     @Test("providers report the platform they serve")
     func platforms() {
         #expect(TartProvider(config: MacOSConfig()).platform == .macos)

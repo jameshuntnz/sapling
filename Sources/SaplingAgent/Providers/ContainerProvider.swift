@@ -132,6 +132,17 @@ struct ContainerProvider: JobProvider, Sendable {
             return code
         }
 
+        if EgressCheck.isEgressFailure(exitCode) {
+            // The repair that actually works: the container system reports
+            // itself running while its bridge is gone, so restarting it is what
+            // brings the host-side gateway back. Done here rather than in
+            // preflight because the bridge only exists while a container runs —
+            // there is nothing to inspect before one starts.
+            await events.log("egress check failed; restarting the container system")
+            await Self.restartContainerSystem()
+            throw ProviderError(EgressCheck.failureReason)
+        }
+
         return JobOutcome(
             exitCode: exitCode,
             message: exitCode == 0 ? nil : "container exited with status \(exitCode)"
@@ -158,6 +169,21 @@ struct ContainerProvider: JobProvider, Sendable {
         return args
     }
 
+    /// Restarts Apple's `container` service, recreating its network.
+    ///
+    /// `container system status` reports "running" for a system whose bridge
+    /// has gone, so this is not conditional on any status it reports — the
+    /// egress probe failing is the only evidence worth acting on.
+    static func restartContainerSystem() async {
+        for arguments in [["system", "stop"], ["system", "start"]] {
+            guard let command = try? await SessionCommand.invocation("container", arguments) else {
+                return
+            }
+            _ = try? await ProcessRunner.run(
+                command.executable, command.arguments, timeout: .seconds(120))
+        }
+    }
+
     /// The actions-runner image ships `run.sh` in the runner's home.
     ///
     /// Falling back to a download keeps a plain `ubuntu:latest` usable as an
@@ -165,6 +191,7 @@ struct ContainerProvider: JobProvider, Sendable {
     func runnerScript(for request: JobRunRequest) -> String {
         """
         set -euo pipefail
+        \(EgressCheck.probeScript)
         if [ -x /home/runner/run.sh ]; then
           cd /home/runner
         elif [ -x ./run.sh ]; then

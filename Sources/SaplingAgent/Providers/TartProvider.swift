@@ -101,6 +101,13 @@ public struct TartProvider: JobProvider, Sendable {
         try await waitForSSH(ip: ip, timeout: request.bootTimeout)
         await events.record(RunEventName.sshConnected, detail: "\(config.sshUsername)@\(ip)")
 
+        // Before the runner, not after: a VM that cannot reach GitHub produces
+        // a runner that retries for minutes and then reports "lost
+        // communication with the server", and in the worst case a VM that hangs
+        // hard enough to hold a slot until the job timeout. One request here
+        // turns all of that into an immediate failure that names the cause.
+        try await verifyEgress(ip: ip, events: events)
+
         try await ensureRunnerPresent(ip: ip, events: events)
         await events.record(RunEventName.runnerRegistered, detail: request.runnerName)
 
@@ -108,6 +115,24 @@ public struct TartProvider: JobProvider, Sendable {
     }
 
     // MARK: - Boot
+
+    /// Fails the job unless the VM can reach GitHub.
+    ///
+    /// The macOS equivalent of the container probe, run over SSH so the failure
+    /// is recorded as Sapling's own event rather than buried in a job log the
+    /// runner may never get far enough to produce.
+    private func verifyEgress(ip: String, events: any EventSink) async throws {
+        let result = try await ProcessRunner.run(
+            "ssh",
+            sshArguments(ip: ip) + ["bash -s"],
+            standardInput: EgressCheck.probeScript,
+            timeout: .seconds(EgressCheck.timeout + 15)
+        )
+        guard !EgressCheck.isEgressFailure(result.exitCode), result.succeeded else {
+            throw ProviderError(EgressCheck.failureReason)
+        }
+        await events.log("egress ok")
+    }
 
     private func waitForIP(vmName: String, timeout: Duration) async throws -> String {
         let deadline = ContinuousClock.now + timeout
