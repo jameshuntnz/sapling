@@ -1,8 +1,12 @@
 name: CI
 
+# Deliberately not on pushes to main. The release workflow runs there, and its
+# Verify step is a superset of everything here — running both duplicated the
+# work and, with only two macOS slots on the node, made each push queue behind
+# itself for the better part of ten minutes.
 on:
   push:
-    branches: [main, master]
+    branches-ignore: [main]
   pull_request:
   workflow_dispatch:
 
