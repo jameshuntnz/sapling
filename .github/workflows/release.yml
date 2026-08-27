@@ -35,6 +35,18 @@ jobs:
         with:
           fetch-depth: 0  # version derivation needs full history and tags
 
+      # Worth it by a distance: an uncached release spends ~460s compiling,
+      # a cached one ~30s. The restore itself costs ~130s, which is the price
+      # of every job running in a fresh VM with an empty .build.
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved') }}-
+            spm-release-${{ runner.os }}-
+
       - name: Work out the version
         id: version
         run: |

@@ -293,6 +293,7 @@ Found during bring-up, not yet fixed.
 | `doctor` can't verify pf as non-root | Run as `admin` it reports *"anchor wired; rules are written when the first job starts"* even when rules **are** loaded, because `pfctl -sr` needs root. Misleading. Either escalate for that check or say "cannot verify without root". |
 | Mixed log timestamps | Sapling logs UTC (`2026-08-26T11:09:18Z`), Vapor logs local (`2026-08-26T23:09:18+1200`). Same file, two clocks, twelve hours apart. Genuinely confusing when reading a log. |
 | No `sapling logs` command | Reading daemon logs means SSH-ing and `tail`-ing a file. The event log is served over the API; the daemon's own log isn't. |
+| Build cache goes over the network | Every job runs in a fresh VM with an empty `.build`, so CI restores a 919MB cache from GitHub — 128s, against a 22s incremental build. On a self-hosted node that is absurd: the cache could live on the host and be mounted into the VM with `tart run --dir`, making it a local disk read instead of a download. That needs Sapling to support mounting a directory into job environments, which would also give Linux jobs a shared package cache. Probably the single largest remaining win on build times. |
 | Job pickup latency | ~2–3 minutes observed from push to claim, against a 30s poll. Worth measuring: GitHub's `runs?status=queued` may lag, in which case the poll interval isn't the lever it appears to be. |
 
 ---
