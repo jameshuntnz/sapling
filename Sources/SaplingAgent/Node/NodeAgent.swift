@@ -27,8 +27,8 @@ public actor NodeAgent {
     let config: SaplingConfig
     let store: SaplingStore
     let github: GitHubClient
-    let macProvider: TartProvider?
-    let linuxProvider: ContainerProvider?
+    let macProvider: (any JobProvider)?
+    let linuxProvider: (any JobProvider)?
 
     /// GitHub runner names all start with this, so orphan sweeping can tell
     /// Sapling's runners from any others in the repo.
@@ -58,11 +58,31 @@ public actor NodeAgent {
 
     /// Creates an agent for the given configuration and store.
     public init(config: SaplingConfig, store: SaplingStore) {
+        self.init(
+            config: config,
+            store: store,
+            macProvider: config.macos.enabled ? TartProvider(config: config.macos) : nil,
+            linuxProvider: config.linux.enabled ? ContainerProvider(config: config.linux) : nil
+        )
+    }
+
+    /// Creates an agent with providers supplied directly.
+    ///
+    /// Exists so the cancellation path can be tested. Cancelling a running job
+    /// is the one behaviour here that cannot be checked on the machine it
+    /// matters on without burning two hours of real slot time, so it is worth
+    /// a seam that lets a fake provider stand in for a VM.
+    init(
+        config: SaplingConfig,
+        store: SaplingStore,
+        macProvider: (any JobProvider)?,
+        linuxProvider: (any JobProvider)?
+    ) {
         self.config = config
         self.store = store
         self.github = GitHubClient(config: config.github)
-        self.macProvider = config.macos.enabled ? TartProvider(config: config.macos) : nil
-        self.linuxProvider = config.linux.enabled ? ContainerProvider(config: config.linux) : nil
+        self.macProvider = macProvider
+        self.linuxProvider = linuxProvider
         self.nodeID = Self.stableNodeID(name: config.node.name)
     }
 

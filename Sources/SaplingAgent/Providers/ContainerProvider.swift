@@ -67,14 +67,19 @@ struct ContainerProvider: JobProvider, Sendable {
         let name = Self.containerPrefix + request.runnerName
         let image = request.image ?? config.defaultImage
 
-        defer {
-            Task.detached {
-                await events.record(RunEventName.cleanupStarted, detail: name)
-                await Self.forceTeardown(name: name)
-                await events.record(RunEventName.cleanupFinished, detail: name)
-            }
+        do {
+            let outcome = try await start(name: name, image: image, request: request, events: events)
+            await Self.teardown(name: name, events: events)
+            return outcome
+        } catch {
+            await Self.teardown(name: name, events: events)
+            throw error
         }
+    }
 
+    private func start(
+        name: String, image: String, request: JobRunRequest, events: any EventSink
+    ) async throws -> JobOutcome {
         await events.log("pulling \(image)")
         // Three things this call has to get right, each of which failed
         // silently before because a pull failure is treated as non-fatal:
@@ -175,6 +180,20 @@ struct ContainerProvider: JobProvider, Sendable {
         fi
         exec ./run.sh --jitconfig \(shellQuote(request.jitConfig))
         """
+    }
+
+    /// Delete the container, and don't come back until it is actually gone.
+    ///
+    /// Awaited, and detached, for the same two reasons as the macOS path: the
+    /// caller frees the job's slot as soon as `run` returns, and a cancelled
+    /// task cannot run `container stop` — `ProcessRunner` would terminate it
+    /// immediately. See `TartProvider.teardown`.
+    static func teardown(name: String, events: any EventSink) async {
+        await Task.detached {
+            await events.record(RunEventName.cleanupStarted, detail: name)
+            await forceTeardown(name: name)
+            await events.record(RunEventName.cleanupFinished, detail: name)
+        }.value
     }
 
     static func forceTeardown(name: String) async {

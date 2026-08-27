@@ -35,6 +35,14 @@ struct FakeGitHubFixtures {
     var inProgressRunIDs: [Int64] = []
     /// Raw `.../runs/:id/jobs` payload per run id.
     var jobsByRun: [Int64: String] = [:]
+    /// Raw `.../actions/jobs/:id` payload per job id.
+    ///
+    /// These are the single-job lookups the agent uses to find out what GitHub
+    /// did with a job. Ids absent here answer 404, itself a case worth testing.
+    var jobByID: [Int64: String] = [:]
+    /// Repos whose run listing should fail, for testing that one unreachable
+    /// repo doesn't distort what we believe about the others.
+    var failingRepos: Set<String> = []
 }
 
 /// A stand-in for the GitHub REST API.
@@ -64,6 +72,11 @@ struct FakeGitHubServer {
         app.logger.logLevel = .critical
 
         app.get("repos", ":owner", ":repo", "actions", "runs") { request -> Response in
+            let repo =
+                "\(request.parameters.get("owner") ?? "")/\(request.parameters.get("repo") ?? "")"
+            guard !fixtures.failingRepos.contains(repo) else {
+                return Self.json(#"{"message":"Server Error"}"#, status: .internalServerError)
+            }
             let status = (try? request.query.get(String.self, at: "status")) ?? ""
             let ids = status == "queued" ? fixtures.queuedRunIDs : fixtures.inProgressRunIDs
             let runs = ids.map { #"{"id":\#($0),"name":"CI","status":"\#(status)"}"# }
@@ -77,7 +90,11 @@ struct FakeGitHubServer {
         }
 
         app.get("repos", ":owner", ":repo", "actions", "jobs", ":jobID") { request -> Response in
-            guard request.parameters.get("jobID") == "9001" else {
+            let jobID = Int64(request.parameters.get("jobID") ?? "") ?? 0
+            if let payload = fixtures.jobByID[jobID] {
+                return Self.json(payload)
+            }
+            guard jobID == 9001 else {
                 return Self.json(#"{"message":"Not Found"}"#, status: .notFound)
             }
             return Self.json(
@@ -166,6 +183,18 @@ struct FakeGitHubServer {
     func shutdown() async {
         try? await app.asyncShutdown()
     }
+}
+
+/// One `.../actions/jobs/:id` payload, in the shape GitHub returns.
+func fakeRemoteJob(
+    id: Int64, status: String, conclusion: String?, labels: [String] = ["self-hosted", "macos"]
+) -> String {
+    let quoted = labels.map { #""\#($0)""# }.joined(separator: ",")
+    let concluded = conclusion.map { #""\#($0)""# } ?? "null"
+    return #"""
+        {"id":\#(id),"run_id":100,"name":"build","status":"\#(status)","conclusion":\#(concluded),
+         "labels":[\#(quoted)],"started_at":null,"completed_at":null,"runner_name":null}
+        """#
 }
 
 enum FakeGitHubFixtureLibrary {

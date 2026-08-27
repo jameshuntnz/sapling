@@ -223,6 +223,8 @@ public enum RunEventName {
     public static let jobCompleted = "job_completed"
     /// The job failed, or couldn't be run.
     public static let jobFailed = "job_failed"
+    /// GitHub withdrew the job, so the node stopped running it.
+    public static let jobCancelled = "job_cancelled"
     /// Teardown of the VM or container began.
     public static let cleanupStarted = "cleanup_started"
     /// Teardown finished and the slot was released.

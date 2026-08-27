@@ -73,6 +73,15 @@ extension NodeAgent {
 
             await finalize(job: job, outcome: outcome, events: events)
         } catch {
+            // Cancellation is `abandon`'s to record, not ours. GRDB honours
+            // task cancellation, so every store write from here would throw
+            // `CancellationError` into a `try?` and silently do nothing —
+            // leaving the job `running` and its slot held. `abandon` writes the
+            // outcome from the poll task, which is not cancelled.
+            if Task.isCancelled {
+                Log.info("job \(job.id) stopped after GitHub withdrew it")
+                return
+            }
             await events.record(RunEventName.jobFailed, detail: error.localizedDescription)
             try? await store.updateJobStatus(
                 id: job.id,

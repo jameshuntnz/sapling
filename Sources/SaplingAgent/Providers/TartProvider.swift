@@ -54,15 +54,22 @@ public struct TartProvider: JobProvider, Sendable {
         let vmName = Self.vmPrefix + request.runnerName
 
         // Teardown has to happen no matter how we leave this function — a
-        // leaked VM holds one of only two macOS slots until someone notices.
-        defer {
-            Task.detached {
-                await events.record(RunEventName.cleanupStarted, detail: vmName)
-                await Self.forceTeardown(vmName: vmName)
-                await events.record(RunEventName.cleanupFinished, detail: vmName)
-            }
+        // leaked VM holds one of only two macOS slots until someone notices —
+        // and it has to be *awaited*, because the caller releases the slot as
+        // soon as this returns.
+        do {
+            let outcome = try await boot(vmName: vmName, request: request, events: events)
+            await Self.teardown(vmName: vmName, events: events)
+            return outcome
+        } catch {
+            await Self.teardown(vmName: vmName, events: events)
+            throw error
         }
+    }
 
+    private func boot(
+        vmName: String, request: JobRunRequest, events: any EventSink
+    ) async throws -> JobOutcome {
         await events.record(RunEventName.vmCloned, detail: "cloning \(config.baseImage) -> \(vmName)")
         let cloneCommand = try await Self.tart(["clone", config.baseImage, vmName])
         try await ProcessRunner.runChecked(
@@ -228,51 +235,6 @@ public struct TartProvider: JobProvider, Sendable {
             exitCode: exitCode,
             message: exitCode == 0 ? nil : "runner exited with status \(exitCode)"
         )
-    }
-
-    // MARK: - Teardown
-
-    /// Stop-then-delete, ignoring failures at each step: a VM that never
-    /// booted can't be stopped, and one that was never cloned can't be
-    /// deleted, but neither should stop us reclaiming the slot.
-    static func forceTeardown(vmName: String) async {
-        for arguments in [["stop", "--timeout", "30", vmName], ["delete", vmName]] {
-            guard let command = try? await tart(arguments) else { return }
-            _ = try? await ProcessRunner.run(
-                command.executable, command.arguments, timeout: .seconds(60))
-        }
-    }
-
-    func reapOrphans() async -> [String] {
-        guard let command = try? await Self.tart(["list", "--format", "json"]),
-            let result = try? await ProcessRunner.run(command.executable, command.arguments),
-            result.succeeded,
-            let data = result.stdout.data(using: .utf8),
-            let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else {
-            return []
-        }
-        var reaped: [String] = []
-        for name in Self.reapableVMNames(from: entries, protecting: config.baseImage) {
-            await Self.forceTeardown(vmName: name)
-            reaped.append(name)
-        }
-        return reaped
-    }
-
-    /// Which listed VMs are leaked job clones safe to delete.
-    ///
-    /// Split out from the `tart` call so the filtering can be tested: getting
-    /// this wrong destroyed an 80GB base image that takes an hour to rebuild.
-    static func reapableVMNames(from entries: [[String: Any]], protecting baseImage: String) -> [String] {
-        entries.compactMap { entry in
-            guard let name = entry["Name"] as? String ?? entry["name"] as? String else { return nil }
-            guard name.hasPrefix(vmPrefix) else { return nil }
-            // Belt and braces: never delete the image every job is cloned from,
-            // whatever it happens to be called.
-            guard name != baseImage else { return nil }
-            return name
-        }
     }
 }
 
