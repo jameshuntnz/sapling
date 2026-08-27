@@ -49,6 +49,38 @@ struct RunnerImageTests {
         #expect(!RunnerImageSelector.isValidName(String(repeating: "a", count: 65)))
     }
 
+    /// GitHub dispatches a job only to a runner whose labels are a *superset*
+    /// of the job's, so the selector has to go back on when the runner is
+    /// registered — the exact opposite of what happens when deciding whether
+    /// this node may run it.
+    ///
+    /// Getting this wrong is silent and expensive: the runner connects, reports
+    /// "Listening for Jobs", is never given one, and holds a slot until the job
+    /// timeout hours later. Nothing in the runner's own output says why.
+    @Test("a runner advertises the image selector the job asked for")
+    func runnerLabelsIncludeSelector() {
+        let nodeLabels = ["self-hosted", "linux", "arm64"]
+        let jobLabels = ["self-hosted", "linux", "arm64", "image:android"]
+
+        // What execution builds for the JIT registration.
+        var registered = nodeLabels
+        if let selector = RunnerImageSelector.split(jobLabels).image {
+            registered.append(RunnerImageSelector.labelPrefix + selector)
+        }
+
+        // GitHub's rule, stated directly.
+        #expect(Set(jobLabels).isSubset(of: Set(registered)))
+        #expect(registered.contains("image:android"))
+
+        // A job asking for no image must not gain a stray selector.
+        var plain = nodeLabels
+        if let selector = RunnerImageSelector.split(nodeLabels).image {
+            plain.append(RunnerImageSelector.labelPrefix + selector)
+        }
+        #expect(plain == nodeLabels)
+        #expect(Set(nodeLabels).isSubset(of: Set(plain)))
+    }
+
     // MARK: - Tagging
 
     /// Tags stay flat because a slash would be read as a registry path.
