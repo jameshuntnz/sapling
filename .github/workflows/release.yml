@@ -1,16 +1,32 @@
 name: Release
+# Without this a workflow_run job is listed under the triggering run's title,
+# which says nothing about what is being published.
+run-name: >-
+  Release ${{ github.event.inputs.channel || 'dev' }} @
+  ${{ github.event.workflow_run.head_sha || github.sha }}
 
-# Every push to main publishes a dev build. Promotion to rc and stable is
-# deliberate — run this workflow by hand and choose the channel.
+# A dev build is published for every commit that reaches main green — but this
+# runs after CI, not on the push.
 #
-# Hotfixes are cut from a release branch (release/X.Y.x) so a fix can ship
-# without dragging in whatever has since landed on main.
-# Releases are deliberate. Publishing on every push to main meant routine
-# commits produced dev.2, dev.3, dev.4 — each one occupying half the node for
-# five minutes to build something nobody asked for.
+# Two problems that solves. A release measured 306s, of which 158s was Verify
+# re-running exactly what CI had just run on the same commit; triggering on
+# CI's success means the automatic path can skip it and publish in ~145s, less
+# than CI itself costs. And bursts now collapse for free: CI cancels in
+# progress, so six rapid pushes leave one surviving CI run and therefore one
+# release. This workflow cannot cancel in progress — a release interrupted
+# between tagging and publishing leaves a tag with no release behind it — so on
+# push it would have queued six 517s builds through one of two macOS slots.
 #
-# Pushes to main are verified by CI. Publishing is a decision you make.
+# Promotion to rc and stable stays deliberate, and a deliberate run always
+# verifies: it may be pointed at a commit CI never saw, and those are the
+# releases worth the extra three minutes. Hotfixes are cut from a release
+# branch (release/X.Y.x) so a fix can ship without dragging in whatever has
+# since landed on main.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       channel:
@@ -29,6 +45,11 @@ permissions:
 
 jobs:
   release:
+    # workflow_run fires on *every* completion, cancelled and failed included,
+    # so the conclusion has to be checked explicitly or a red CI run publishes.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
     # Sapling releases itself, on the node Sapling provisioned.
     runs-on: [self-hosted, macos, arm64]
     timeout-minutes: 45
@@ -37,11 +58,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # version derivation needs full history and tags
+          # A workflow_run job checks out the default branch by default, which
+          # is not necessarily the commit CI verified — main may have moved on
+          # while CI ran. Releasing the branch head would publish a commit
+          # nothing checked.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Work out the version
         id: version
         run: |
-          CHANNEL="${{ github.event.inputs.channel }}"
+          # A workflow_run event carries no inputs; the automatic path is dev.
+          CHANNEL="${{ github.event.inputs.channel || 'dev' }}"
           VERSION="$(./scripts/next-version.sh "$CHANNEL" || true)"
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           if [ -z "$VERSION" ]; then
@@ -59,9 +86,13 @@ jobs:
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           fi
 
-      # Never publish something that does not pass its own checks.
+      # Skipped on the automatic path: CI ran precisely these checks on this
+      # exact commit, which is the event that triggered this run. A deliberate
+      # dispatch verifies regardless — it may target a commit CI never saw.
       - name: Verify
-        if: steps.version.outputs.release == 'true'
+        if: >-
+          steps.version.outputs.release == 'true'
+          && github.event_name == 'workflow_dispatch'
         run: |
           ./scripts/check-workflows.sh
           ./scripts/lint.sh

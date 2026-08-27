@@ -42,6 +42,12 @@ jobs:
       - name: File sizes
         run: ./scripts/check-file-sizes.sh
 
+      # Cheap (about a second) and it closes the last gap between these checks
+      # and the release pipeline's, which is what lets a release triggered by
+      # this run skip re-verifying anything.
+      - name: Version derivation
+        run: ./scripts/test-next-version.sh
+
       - name: Build
         run: swift build --build-tests
 

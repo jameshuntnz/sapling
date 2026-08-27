@@ -52,7 +52,23 @@ covers this against the spec's own worked example.
 
 ## Cutting a release
 
-Releases are deliberate. Pushing to `main` runs CI and publishes nothing.
+**A dev build publishes for every commit that reaches `main` green.** Release
+is triggered by CI succeeding, not by the push — which is what makes it cheap
+enough to do every time:
+
+- CI has just run lint, sizes, workflows, version derivation and the full test
+  suite on that exact commit, so the release skips its own Verify. That was
+  158s of a 306s release, so the automatic path costs about 145s.
+- CI cancels in progress, so a burst of pushes leaves one surviving CI run and
+  therefore one release. Release *cannot* cancel in progress — interrupting it
+  between tagging and publishing would leave a tag with no release — so
+  triggering on push would have queued a build per commit.
+
+A red or cancelled CI run publishes nothing: `workflow_run` fires on every
+completion, so the release checks the conclusion.
+
+Promotion to **rc** and **stable** stays deliberate, and a deliberate run
+always verifies — it may be aimed at a commit CI never saw.
 
 **Actions → Release → Run workflow**, and pick a channel. Or:
 
@@ -164,7 +180,8 @@ That reinstalls the old version and restarts. `sapling doctor` afterwards.
 
 | Event | Workflow | Publishes |
 |---|---|---|
-| push to `main` | CI — workflows, lint, sizes, build, test | no |
+| push to `main` | CI — workflows, lint, sizes, version derivation, build, test | no |
+| **CI succeeds on `main`** | Release, on the `dev` channel | **yes** |
 | pull request | CI | no |
 | **Actions → Release** | Release — verify, build, tag, publish | **yes** |
 | Actions → Verify node | the hardware checks in [TESTING.md](TESTING.md) | no |
