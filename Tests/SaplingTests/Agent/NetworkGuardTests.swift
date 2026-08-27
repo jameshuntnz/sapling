@@ -151,3 +151,43 @@ struct JobSubnetCoverageTests {
         #expect(gateways.contains("10.99.0.1/32"))
     }
 }
+
+/// The gateway is the host's own address on the bridge, so it sits inside the job subnet.
+///
+/// Left in the jobnets table, the host's traffic to a VM matches "from <jobnets> to <blocked>" and is dropped
+/// — and the symptom is the agent unable to SSH into the VM it just booted, which reads as a broken base
+/// image. It stalled two slots for the full boot timeout, twice.
+@Suite("Gateway exclusion")
+struct GatewayExclusionTests {
+    /// Mirrors how the anchor's jobnets table is built.
+    func entries(for subnets: [String]) -> [String] {
+        subnets.flatMap { subnet -> [String] in
+            guard let gateway = NetworkGuard.gatewayCIDR(forSubnet: subnet) else { return [subnet] }
+            return [subnet, "!\(gateway.replacingOccurrences(of: "/32", with: ""))"]
+        }
+    }
+
+    @Test("every subnet is paired with its gateway negated")
+    func gatewayIsExcluded() {
+        let built = entries(for: ["192.168.64.0/24", "192.168.65.0/24"])
+        #expect(built == ["192.168.64.0/24", "!192.168.64.1", "192.168.65.0/24", "!192.168.65.1"])
+    }
+
+    /// The host reaches a VM from the gateway address, so that address must
+    /// not be treated as a job environment.
+    @Test("the host's own address is never inside the job set")
+    func hostIsNotAJob() {
+        let built = entries(for: NetworkConfig.defaultJobSubnets)
+        for subnet in NetworkConfig.defaultJobSubnets {
+            let gateway = NetworkGuard.gatewayCIDR(forSubnet: subnet)!
+                .replacingOccurrences(of: "/32", with: "")
+            #expect(built.contains("!\(gateway)"), "\(gateway) must be excluded")
+        }
+    }
+
+    /// A subnet that cannot yield a gateway is still covered, not dropped.
+    @Test("keeps a subnet whose gateway cannot be derived")
+    func malformedSubnetSurvives() {
+        #expect(entries(for: ["not-a-subnet"]) == ["not-a-subnet"])
+    }
+}
