@@ -64,6 +64,11 @@ jobs:
           ./scripts/lint.sh
           ./scripts/check-file-sizes.sh
           ./scripts/test-next-version.sh
+          # Debug, deliberately. Testing in release configuration looks like
+          # it would let the packaging step below reuse the artifacts, but
+          # `swift test` builds with testability enabled and the product build
+          # cannot reuse those either way: measured at 196s against 192s for
+          # debug, so it buys nothing and compiles slower.
           swift test
 
       - name: Stamp the version
