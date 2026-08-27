@@ -116,7 +116,17 @@ struct Update: AsyncParsableCommand {
             try? await Task.sleep(for: .seconds(2))
             guard let status = try? await client.status() else { continue }
 
-            if status.version == version {
+            // Compared as versions, not strings. The binary reports build
+            // metadata the release tag does not carry, so "0.1.1-dev.2+11da700"
+            // and "0.1.1-dev.2" are the same release — and semver says so,
+            // while string equality calls a perfectly good update a mismatch
+            // and sends the operator to `doctor` for nothing.
+            let installed = SemanticVersion(status.version)
+            let expected = SemanticVersion(version)
+            let matches =
+                if let installed, let expected { installed == expected } else { status.version == version }
+
+            if matches {
                 print("  \(Style.green("now running \(status.version)")) after \(attempt * 2)s")
             } else {
                 print(

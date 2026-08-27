@@ -135,3 +135,26 @@ struct ReleaseChannelTests {
         #expect(SemanticVersion("1.0.0-alpha.1")?.channel == .dev)
     }
 }
+
+@Suite("Update confirmation")
+struct UpdateConfirmationTests {
+    /// After an update the daemon reports build metadata the release tag does not carry.
+    ///
+    /// Compared as strings that reads as a failed update and sends the operator to `doctor`; compared as
+    /// versions it is the same release.
+    @Test("a build-stamped version matches the release it came from")
+    func buildMetadataStillMatches() throws {
+        let installed = try #require(SemanticVersion("0.1.1-dev.2+11da700"))
+        let expected = try #require(SemanticVersion("0.1.1-dev.2"))
+        #expect(installed == expected)
+        #expect(installed.description != expected.description)
+    }
+
+    /// A genuinely different version must still be reported.
+    @Test("a different version is still a mismatch")
+    func realMismatchIsCaught() throws {
+        let installed = try #require(SemanticVersion("0.1.0"))
+        let expected = try #require(SemanticVersion("0.1.1-dev.2"))
+        #expect(installed != expected)
+    }
+}
