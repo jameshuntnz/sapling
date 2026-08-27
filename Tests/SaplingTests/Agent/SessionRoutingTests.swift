@@ -30,6 +30,7 @@ struct SessionRoutingTests {
     @Test("no source file invokes tart or container directly")
     func allInvocationsGoThroughSessionCommand() throws {
         let pattern = try Regex(#"ProcessRunner\.(run|runChecked|stream)\(\s*"(tart|container)""#)
+            .dotMatchesNewlines()
 
         // Without this, a wrong path scans nothing, finds no offenders, and
         // reports success — the one outcome this test must never produce.
@@ -45,9 +46,17 @@ struct SessionRoutingTests {
             guard url.pathExtension == "swift" else { continue }
             scanned += 1
             let source = try String(contentsOf: url, encoding: .utf8)
-            for line in source.split(separator: "\n", omittingEmptySubsequences: false)
-            where line.firstMatch(of: pattern) != nil {
-                offenders.append("\(url.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces))")
+            // Matched against the whole file, not line by line. Scanning lines
+            // let a real offender through for months: swift-format had wrapped
+            //   ProcessRunner.run(
+            //       "container", ["images", "pull", image], ...)
+            // across two lines, so neither line matched on its own and the
+            // guard reported clean while the call ran unrouted as root.
+            for match in source.matches(of: pattern) {
+                let line = source[..<match.range.lowerBound].split(
+                    separator: "\n", omittingEmptySubsequences: false
+                ).count
+                offenders.append("\(url.lastPathComponent):\(line)")
             }
         }
 
