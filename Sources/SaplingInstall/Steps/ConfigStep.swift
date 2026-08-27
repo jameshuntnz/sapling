@@ -55,7 +55,13 @@ public struct ConfigStep: InstallStep {
         }
 
         if config.github.repos.isEmpty {
-            let raw = Prompt.line("Repositories to watch (comma-separated owner/repo)") ?? ""
+            // Blank is a real answer under App auth — the installation already
+            // says which repositories this node may see, and repeating that
+            // here just gives it a second place to drift from.
+            let raw =
+                Prompt.line(
+                    "Repositories to watch (comma-separated owner/repo, or blank for every "
+                        + "private repo the GitHub App can reach)") ?? ""
             config.github.repos =
                 raw
                 .split(separator: ",")

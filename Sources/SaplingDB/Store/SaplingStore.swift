@@ -15,6 +15,13 @@ public final class SaplingStore: Sendable {
         public static let lastPollAt = "last_poll_at"
         /// Why the last poll failed, if it did.
         public static let lastPollError = "last_poll_error"
+        /// Repositories currently being polled, as a JSON array.
+        ///
+        /// Written by the agent because the list may be discovered from the
+        /// App installation rather than configured; the control plane reads it
+        /// so `status` reports what is actually watched, not what was asked
+        /// for.
+        public static let watchedRepos = "watched_repos"
     }
 
     let writer: any DatabaseWriter

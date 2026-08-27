@@ -125,4 +125,45 @@ struct JobSubnetConfigTests {
             """)
         #expect(config.network.jobSubnets == NetworkConfig.defaultJobSubnets)
     }
+
+    /// Empty repos is how a node says "watch whatever the App installation
+    /// grants" — so it must validate under App auth, and must not under a PAT,
+    /// which has no installation to enumerate and would otherwise mean every
+    /// repository its owner can see.
+    @Test("an empty repo list is valid for App auth and refused for a PAT")
+    func emptyReposDependsOnAuthMode() throws {
+        // validate() also checks the key exists, so give it a real path.
+        let directory = try TemporaryDirectory()
+        let key = directory.appending("key.pem")
+        try "not-a-real-key".write(to: key, atomically: true, encoding: .utf8)
+
+        let app = try ConfigFixture.decode(
+            """
+            [github]
+            auth = "app"
+            app_id = "123"
+            installation_id = "456"
+            private_key_path = "\(key.path)"
+            """)
+        #expect(app.github.repos.isEmpty)
+        #expect(throws: Never.self) { try app.validate() }
+
+        let pat = try ConfigFixture.decode(
+            """
+            [github]
+            auth = "pat"
+            token = "ghp_example"
+            """)
+        #expect(throws: ConfigError.self) { try pat.validate() }
+
+        // Spelled out, a PAT is fine.
+        let listed = try ConfigFixture.decode(
+            """
+            [github]
+            auth = "pat"
+            token = "ghp_example"
+            repos = ["acme/widgets"]
+            """)
+        #expect(throws: Never.self) { try listed.validate() }
+    }
 }

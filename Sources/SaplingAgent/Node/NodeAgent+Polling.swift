@@ -29,7 +29,7 @@ extension NodeAgent {
 
         // Discover work even while cordoned, so the UI still shows what is
         // waiting — just don't dispatch any of it.
-        for repo in config.github.repos {
+        for repo in await watchedRepos() {
             let jobs = try await github.queuedJobs(repo: repo)
             for job in jobs {
                 guard let platform = platform(matching: job.labels) else { continue }

@@ -125,6 +125,45 @@ actor GitHubClient {
         try await request("GET", "/repos/\(repo)/actions/jobs/\(jobID)", as: WorkflowJob.self)
     }
 
+    // MARK: - Installation
+
+    /// Every repository this App installation can reach.
+    ///
+    /// Lets a node leave `github.repos` empty and watch whatever it has been
+    /// granted, so adding a repository is done once on GitHub rather than
+    /// twice — there and again in the node's config.
+    ///
+    /// Public repositories are **excluded**. Sapling does not sandbox against
+    /// adversarial job code, so a public repo reaching this list by way of an
+    /// installation nobody re-read is exactly the accident worth preventing.
+    /// A public repo named explicitly in config still runs, with a warning:
+    /// naming it is a decision, inheriting it is not.
+    func installationRepositories() async throws -> (private: [String], skippedPublic: [String]) {
+        var accepted: [String] = []
+        var skipped: [String] = []
+        var page = 1
+        while true {
+            let response = try await request(
+                "GET",
+                "/installation/repositories?per_page=100&page=\(page)",
+                as: InstallationRepositoriesResponse.self
+            )
+            if response.repositories.isEmpty { break }
+            for repository in response.repositories {
+                if repository.private {
+                    accepted.append(repository.fullName)
+                } else {
+                    skipped.append(repository.fullName)
+                }
+            }
+            guard accepted.count + skipped.count < response.totalCount else { break }
+            page += 1
+            // GitHub caps pagination; without this a bad total_count loops.
+            if page > 20 { break }
+        }
+        return (accepted, skipped)
+    }
+
     // MARK: - Repository contents
 
     /// Tree SHA of one directory at a commit, or `nil` if it isn't there.

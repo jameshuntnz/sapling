@@ -48,6 +48,15 @@ struct ControlPlane: Sendable {
 
         let dayAgo = Date().addingTimeInterval(-86400)
         let lastPollRaw = try await store.state(SaplingStore.StateKey.lastPollAt)
+        // Configured repos win; otherwise report what discovery actually
+        // resolved, which is the honest answer to "what is this node watching".
+        let watched: [String]
+        if !config.github.repos.isEmpty {
+            watched = config.github.repos
+        } else {
+            let raw = try await store.state(SaplingStore.StateKey.watchedRepos) ?? "[]"
+            watched = (try? JSONDecoder().decode([String].self, from: Data(raw.utf8))) ?? []
+        }
 
         return StatusResponse(
             version: SaplingVersion.current,
@@ -57,7 +66,7 @@ struct ControlPlane: Sendable {
             runningJobs: (inUse[.macos] ?? 0) + (inUse[.linux] ?? 0),
             completedLast24h: try await store.countJobs(status: .completed, since: dayAgo),
             failedLast24h: try await store.countJobs(status: .failed, since: dayAgo),
-            watchedRepos: config.github.repos,
+            watchedRepos: watched,
             lastPollAt: lastPollRaw.flatMap { ISO8601DateFormatter().date(from: $0) },
             lastPollError: try await store.state(SaplingStore.StateKey.lastPollError),
             metrics: await agent?.metrics.current()

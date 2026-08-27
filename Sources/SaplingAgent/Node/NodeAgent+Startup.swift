@@ -49,7 +49,7 @@ extension NodeAgent {
     /// A public repo can be made to run fork PR code, which breaks that
     /// assumption, so say so loudly.
     func warnAboutPublicRepos() async {
-        for repo in config.github.repos {
+        for repo in await watchedRepos() {
             if let isPublic = try? await github.isPublic(repo: repo), isPublic {
                 Log.error(
                     """

@@ -52,6 +52,16 @@ struct RegistrationTokenResponse: Decodable {
     let expiresAt: Date
 }
 
+struct InstallationRepository: Decodable, Sendable {
+    let fullName: String
+    let `private`: Bool
+}
+
+struct InstallationRepositoriesResponse: Decodable, Sendable {
+    let totalCount: Int
+    let repositories: [InstallationRepository]
+}
+
 /// One entry from the repository contents API.
 struct ContentEntry: Decodable, Sendable {
     let name: String

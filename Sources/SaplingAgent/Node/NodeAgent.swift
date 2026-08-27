@@ -16,6 +16,14 @@ public actor NodeAgent {
     /// Long enough that a project releasing fortnightly still gets a cache hit.
     static let imageRetentionDays = 30
 
+    /// Repositories discovered from the App installation.
+    ///
+    /// Used when `github.repos` is empty; empty itself until the first
+    /// successful discovery.
+    var discoveredRepos: [String] = []
+    /// When discovery last succeeded, for the refresh interval.
+    var reposRefreshedAt: Date?
+
     let config: SaplingConfig
     let store: SaplingStore
     let github: GitHubClient
@@ -101,7 +109,11 @@ public actor NodeAgent {
         pollTask = Task { [weak self] in await self?.pollLoop() }
         metricsTask = Task { [weak self] in await self?.metrics.run() }
         housekeepingTask = Task { [weak self] in await self?.housekeepingLoop() }
-        Log.info("node agent started as \(nodeID) — watching \(config.github.repos.joined(separator: ", "))")
+        let watching = await watchedRepos()
+        Log.info(
+            "node agent started as \(nodeID) — watching "
+                + (watching.isEmpty ? "nothing yet" : watching.joined(separator: ", "))
+                + (config.github.repos.isEmpty ? " (from the App installation)" : ""))
     }
 
     /// Stops polling, cancels running jobs, and marks the node offline.

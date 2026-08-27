@@ -125,8 +125,14 @@ public struct SaplingConfig: Codable, Sendable {
 
     /// Errors that stop the daemon from starting.
     public func validate() throws {
-        if github.repos.isEmpty {
-            throw ConfigError("github.repos is empty — nothing to poll. Add at least one \"owner/repo\".")
+        // Empty is meaningful under App auth: watch whatever the installation
+        // grants. A PAT has no such boundary — it reaches every repository its
+        // owner can see, which is not a poll list, so it still must be spelled
+        // out.
+        if github.repos.isEmpty, github.auth == .pat {
+            throw ConfigError(
+                "github.repos is empty and github.auth is \"pat\" — a token has no "
+                    + "installation to enumerate. List repositories explicitly, or use App auth.")
         }
         for repo in github.repos where repo.split(separator: "/").count != 2 {
             throw ConfigError("github.repos entry \"\(repo)\" is not in owner/repo form")

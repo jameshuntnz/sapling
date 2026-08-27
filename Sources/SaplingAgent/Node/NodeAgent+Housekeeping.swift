@@ -15,7 +15,7 @@ extension NodeAgent {
             {
                 Log.info("pruned \(pruned) old job record(s)")
             }
-            for repo in config.github.repos {
+            for repo in await watchedRepos() {
                 if let count = try? await github.pruneOfflineRunners(
                     repo: repo, namePrefix: Self.runnerNamePrefix), count > 0
                 {

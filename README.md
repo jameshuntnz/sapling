@@ -161,7 +161,7 @@ auth = "app"         # "app" (recommended) or "pat"
 app_id = "123456"
 installation_id = "7654321"
 private_key_path = "~/.sapling/github-app.pem"
-repos = ["acme/widgets"]
+repos = []           # empty: every private repo the App installation grants
 poll_interval_seconds = 30
 
 [macos]
@@ -197,6 +197,29 @@ auto_apply = false       # even when true, only applies while idle
 ```
 
 ---
+
+## Which repositories a node watches
+
+Leave `github.repos` empty and the node watches **every private repository its
+GitHub App installation can reach**, so granting access is done once on GitHub
+rather than twice. List repositories explicitly to narrow it.
+
+The list is re-checked every 15 minutes, so granting or revoking a repository
+takes effect without a restart. If GitHub is unreachable the last known list is
+kept — a node that quietly stopped watching everything is indistinguishable
+from one with no queued work.
+
+**Public repositories are never discovered this way.** Sapling does not sandbox
+against adversarial job code, so a public repo arriving through an installation
+nobody re-read is exactly the accident worth preventing; they are logged and
+skipped. Naming one in `github.repos` still works, with a warning — naming it
+is a decision, inheriting it is not.
+
+Empty is only meaningful under App auth. A PAT has no installation to
+enumerate — it reaches every repository its owner can see — so `repos` must be
+spelled out, and the daemon refuses to start otherwise.
+
+`sapling status` reports the resolved list, not the configured one.
 
 ## Repository-defined images
 
