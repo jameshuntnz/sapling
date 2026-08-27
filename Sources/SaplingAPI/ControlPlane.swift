@@ -142,7 +142,9 @@ struct ControlPlane: Sendable {
         let updater = SelfUpdater(config: config)
         let update: AvailableUpdate?
         do {
-            update = try await updater.check()
+            // With force, take the newest release on the channel whether or not
+            // it outranks what is running. Without it, only a genuine upgrade.
+            update = force ? try await updater.newestRelease() : try await updater.check()
         } catch {
             return UpdateApplyResponse(
                 applying: false, message: "could not check for updates: \(error.localizedDescription)")

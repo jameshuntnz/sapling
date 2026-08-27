@@ -65,11 +65,14 @@ actor ReleaseClient {
 
     /// The newest release this node should install, or `nil` if it is current.
     ///
-    /// - Parameter current: The version running now.
-    /// - Returns: The update to install, or `nil` when nothing newer exists on
-    ///   the configured channel.
+    /// - Parameter current: Only consider releases newer than this. Pass
+    ///   `nil` to take the newest on the channel regardless, which is what
+    ///   `--force` does: reinstalling the same version, or recovering a node
+    ///   whose reported version outranks anything published.
+    /// - Returns: The update to install, or `nil` when the channel offers
+    ///   nothing suitable.
     /// - Throws: `GitHubError` if the releases cannot be read.
-    func latestUpdate(newerThan current: SemanticVersion) async throws -> AvailableUpdate? {
+    func latestUpdate(newerThan current: SemanticVersion?) async throws -> AvailableUpdate? {
         let wanted = config.update.channel
         let candidates = try await releases()
             .filter { !$0.draft }
@@ -79,7 +82,7 @@ actor ReleaseClient {
                 // mismarked in GitHub's UI can't put a dev build on a stable
                 // node.
                 guard wanted.accepts(version.channel) else { return nil }
-                guard version > current else { return nil }
+                if let current { guard version > current else { return nil } }
                 return (release, version)
             }
             .sorted { $0.1 < $1.1 }

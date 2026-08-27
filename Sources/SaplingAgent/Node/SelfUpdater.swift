@@ -66,6 +66,15 @@ public struct SelfUpdater: Sendable {
         return try await client.latestUpdate(newerThan: current)
     }
 
+    /// The newest release on the channel, whether or not it is newer than
+    /// what is running.
+    ///
+    /// - Returns: The release to install, or `nil` if the channel has none.
+    /// - Throws: If the releases cannot be read.
+    public func newestRelease() async throws -> AvailableUpdate? {
+        try await client.latestUpdate(newerThan: nil)
+    }
+
     /// Download, verify, install, and restart into a new version.
     ///
     /// Does not return on success: `launchctl kickstart` replaces this

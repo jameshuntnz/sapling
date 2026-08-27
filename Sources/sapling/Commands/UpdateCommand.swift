@@ -47,7 +47,15 @@ struct Update: AsyncParsableCommand {
         print("  running   \(status.current)  \(Style.dim("(\(status.channel.rawValue) channel)"))")
 
         guard let available = status.available else {
-            print("  \(Style.green("up to date"))")
+            // --force exists for the case where the newest release is not
+            // *newer* — reinstalling the same version, or recovering a node
+            // whose reported version outranks anything published.
+            guard force, !check else {
+                print("  \(Style.green("up to date"))")
+                return
+            }
+            print("  \(Style.dim("no newer release; reinstalling the newest anyway (--force)"))")
+            await forceReinstall(client: client)
             return
         }
 
@@ -81,6 +89,21 @@ struct Update: AsyncParsableCommand {
         }
         print("  \(result.message)")
         await confirmRestart(client: client, expecting: available)
+    }
+
+    /// Install the newest release on the channel regardless of precedence.
+    func forceReinstall(client: SaplingClient) async {
+        do {
+            let result = try await client.applyUpdate(force: true)
+            guard result.applying else { fail(result.message) }
+            print("  \(result.message)")
+            await confirmRestart(client: client, expecting: result.version ?? "")
+        } catch let error as ClientError where error.statusCode == nil {
+            print("  \(Style.dim("connection dropped — checking whether it came back"))")
+            await confirmRestart(client: client, expecting: "")
+        } catch {
+            fail(error.localizedDescription)
+        }
     }
 
     /// Wait for the daemon to come back, and report what version it is now.
