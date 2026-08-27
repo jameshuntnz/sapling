@@ -115,6 +115,23 @@ public struct LinuxConfig: Codable, Sendable {
     public var cpuCount: Int?
     /// Memory per environment in GB. `nil` uses the tool's default.
     public var memoryGB: Int?
+    /// Image architecture to run. `nil` uses the host's, which is `arm64` here.
+    ///
+    /// Set this only to run a foreign-architecture image outright; to run the
+    /// occasional x86-64 binary on an otherwise native arm64 image, leave this
+    /// alone and turn on `rosetta` instead — that keeps the JVM, compilers and
+    /// everything else running natively.
+    public var arch: String?
+    /// Whether to expose Rosetta translation inside the container.
+    ///
+    /// Apple's `container` registers Rosetta as a binfmt handler, so x86-64
+    /// binaries run on an arm64 guest. The one build tool that needs this is
+    /// Android's `aapt2`, which Google publishes for `linux-x86_64` only —
+    /// with this on, an Android build runs natively apart from resource
+    /// packaging. The image must also carry the x86-64 loader and libc
+    /// (`libc6:amd64`, `libgcc-s1:amd64` on Debian/Ubuntu), and the *host*
+    /// must have Rosetta installed.
+    public var rosetta: Bool
 
     /// Concurrency the scheduler actually uses, after clamping.
     public var effectiveMaxConcurrent: Int {
@@ -122,7 +139,7 @@ public struct LinuxConfig: Codable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case enabled, labels
+        case enabled, labels, arch, rosetta
         case defaultImage = "default_image"
         case maxConcurrent = "max_concurrent"
         case jobTimeoutSeconds = "job_timeout_seconds"
@@ -138,7 +155,9 @@ public struct LinuxConfig: Codable, Sendable {
         labels: [String] = ["self-hosted", "linux", "arm64"],
         jobTimeoutSeconds: Int = 7200,
         cpuCount: Int? = nil,
-        memoryGB: Int? = nil
+        memoryGB: Int? = nil,
+        arch: String? = nil,
+        rosetta: Bool = false
     ) {
         self.enabled = enabled
         self.defaultImage = defaultImage
@@ -147,6 +166,8 @@ public struct LinuxConfig: Codable, Sendable {
         self.jobTimeoutSeconds = jobTimeoutSeconds
         self.cpuCount = cpuCount
         self.memoryGB = memoryGB
+        self.arch = arch
+        self.rosetta = rosetta
     }
 
     /// Creates a platform configuration.
@@ -161,5 +182,7 @@ public struct LinuxConfig: Codable, Sendable {
         jobTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .jobTimeoutSeconds) ?? 7200
         cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount)
         memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
+        arch = try c.decodeIfPresent(String.self, forKey: .arch)
+        rosetta = try c.decodeIfPresent(Bool.self, forKey: .rosetta) ?? false
     }
 }

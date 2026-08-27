@@ -80,6 +80,63 @@ struct ProviderTests {
         #expect(script.contains("/home/runner/run.sh"))
     }
 
+    /// These flags are the whole reason an Android build is possible here.
+    ///
+    /// Google publishes `aapt2` for `linux-x86_64` only, so without Rosetta an
+    /// Android build on this arm64 node dies with `Exec format error`.
+    @Test("Linux run arguments carry arch and Rosetta only when configured")
+    func runArgumentsArchAndRosetta() {
+        let request = JobRunRequest(
+            jobID: "1",
+            repo: "acme/widgets",
+            runnerName: "sap-linux-abc",
+            jitConfig: "abc123==",
+            labels: ["self-hosted", "linux"]
+        )
+
+        // Default config asks for neither, so the CLI sees neither flag.
+        let plain = ContainerProvider(config: LinuxConfig())
+            .runArguments(name: "sapling-x", image: "img", request: request)
+        #expect(!plain.contains("--rosetta"))
+        #expect(!plain.contains("--arch"))
+
+        let tuned = ContainerProvider(
+            config: LinuxConfig(cpuCount: 6, memoryGB: 10, arch: "arm64", rosetta: true)
+        ).runArguments(name: "sapling-x", image: "img", request: request)
+        #expect(tuned.contains("--rosetta"))
+        #expect(zip(tuned, tuned.dropFirst()).contains { $0 == "--arch" && $1 == "arm64" })
+        #expect(zip(tuned, tuned.dropFirst()).contains { $0 == "--cpus" && $1 == "6" })
+        #expect(zip(tuned, tuned.dropFirst()).contains { $0 == "--memory" && $1 == "10g" })
+
+        // The image and its command stay last — `container` treats everything
+        // after the image name as the container's own argv.
+        #expect(tuned.dropLast(3).last == "/bin/bash")
+        #expect(tuned[tuned.count - 3] == "img")
+        #expect(tuned[tuned.count - 2] == "-c")
+    }
+
+    /// A node asking for Rosetta it hasn't got should fail at startup with an
+    /// actionable message, not mid-build with an elf loader error that names
+    /// neither Rosetta nor the setting that asked for it.
+    @Test("preflight refuses when Rosetta is configured but absent from the host")
+    func rosettaPreflight() throws {
+        // Off by default, so a node that never asked is never blocked.
+        #expect(throws: Never.self) {
+            try ContainerProvider.checkRosetta(config: LinuxConfig(rosetta: false))
+        }
+
+        let installed = FileManager.default.fileExists(atPath: ContainerProvider.rosettaPath)
+        if installed {
+            #expect(throws: Never.self) {
+                try ContainerProvider.checkRosetta(config: LinuxConfig(rosetta: true))
+            }
+        } else {
+            #expect(throws: ProviderError.self) {
+                try ContainerProvider.checkRosetta(config: LinuxConfig(rosetta: true))
+            }
+        }
+    }
+
     @Test("providers report the platform they serve")
     func platforms() {
         #expect(TartProvider(config: MacOSConfig()).platform == .macos)

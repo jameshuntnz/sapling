@@ -174,6 +174,9 @@ ssh_username = "admin"
 enabled = true
 default_image = "ghcr.io/actions/actions-runner:latest"
 max_concurrent = 2
+rosetta = false                   # translate x86-64 binaries — Android's aapt2 needs it
+                                  # requires Rosetta on the host: see below
+# arch = "arm64"                  # only to run a foreign-architecture image outright
 
 [network]
 block_private_ranges = true    # §8 — leave this on
@@ -192,6 +195,29 @@ auto_apply = false       # even when true, only applies while idle
 ```
 
 ---
+
+## Rosetta, for toolchains with no arm64 build
+
+Some build tools have no arm64 Linux binary at all. Android's `aapt2` is the
+one that bites: Google publishes it for `linux-x86_64` only, and the Gradle
+plugin downloads its own copy from Maven regardless of what the SDK holds, so
+on an arm64 node it fails with `Exec format error`. A container does not
+emulate a CPU, so no image fixes this.
+
+Setting `rosetta = true` exposes Rosetta inside the container, and that one
+binary is translated while the JVM, compilers and everything else keep running
+natively. The image also has to carry the x86-64 loader and libc
+(`libc6:amd64`, `libgcc-s1:amd64` on Debian/Ubuntu).
+
+**Rosetta must be installed on the host**, which a headless Mac that has never
+run an Intel binary will not have:
+
+```bash
+sudo softwareupdate --install-rosetta --agree-to-license
+```
+
+The daemon refuses to start when `rosetta = true` and it is missing, rather
+than letting the job fail with an elf loader error that mentions neither.
 
 ## Open decisions
 

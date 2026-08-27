@@ -13,12 +13,19 @@ struct ContainerProvider: JobProvider, Sendable {
 
     let config: LinuxConfig
     static let containerPrefix = "sapling-"
+    /// Sapling runs on Apple silicon only, so the host is always arm64.
+    static let hostArch = "arm64"
 
     init(config: LinuxConfig) {
         self.config = config
     }
 
     func preflight() async throws {
+        // Checked before anything else: `preflight` returns early once the
+        // container system is up, so a check placed after that would be
+        // skipped on every node where it already is.
+        try Self.checkRosetta(config: config)
+
         // The container system is a background service that does not come up
         // on its own after a reboot; starting it is idempotent.
         let statusCommand = try await SessionCommand.invocation("container", ["system", "status"])
@@ -33,6 +40,28 @@ struct ContainerProvider: JobProvider, Sendable {
             throw ProviderError("`container system start` failed: \(start.stderr)")
         }
     }
+
+    /// Refuses to start when Rosetta is asked for but absent from the host.
+    ///
+    /// Without this the misconfiguration surfaces inside a job, as
+    /// `rosetta error: failed to open elf at /lib64/ld-linux-x86-64.so.2` —
+    /// which names neither Rosetta's absence nor the setting that asked for
+    /// it, and arrives only once a build has already started.
+    static func checkRosetta(config: LinuxConfig) throws {
+        guard config.rosetta else { return }
+        guard !FileManager.default.fileExists(atPath: rosettaPath) else { return }
+        throw ProviderError(
+            """
+            [linux] rosetta = true, but Rosetta is not installed on this host \
+            (\(rosettaPath) is missing). Install it with: \
+            sudo softwareupdate --install-rosetta --agree-to-license \
+            — or set rosetta = false, which disables running x86-64 binaries \
+            such as Android's aapt2.
+            """)
+    }
+
+    /// Where Rosetta lands when installed; its presence is the check.
+    static let rosettaPath = "/Library/Apple/usr/libexec/oah"
 
     func run(_ request: JobRunRequest, events: any EventSink) async throws -> JobOutcome {
         let name = Self.containerPrefix + request.runnerName
@@ -56,13 +85,7 @@ struct ContainerProvider: JobProvider, Sendable {
                 "image pull reported: \(pull.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        var args = ["run", "--rm", "--name", name]
-        if let cpu = config.cpuCount { args += ["--cpus", String(cpu)] }
-        if let memory = config.memoryGB { args += ["--memory", "\(memory)g"] }
-        for (key, value) in request.environment.sorted(by: { $0.key < $1.key }) {
-            args += ["--env", "\(key)=\(value)"]
-        }
-        args += ["--entrypoint", "/bin/bash", image, "-c", runnerScript(for: request)]
+        let args = runArguments(name: name, image: image, request: request)
         let runCommand = try await SessionCommand.invocation("container", args)
 
         await events.record(RunEventName.containerStarted, detail: "\(name) (\(image))")
@@ -99,6 +122,26 @@ struct ContainerProvider: JobProvider, Sendable {
             exitCode: exitCode,
             message: exitCode == 0 ? nil : "container exited with status \(exitCode)"
         )
+    }
+
+    /// Arguments for `container run`, in the order the CLI expects them.
+    ///
+    /// `--rosetta` is what makes an Android build possible here: Google ships
+    /// `aapt2` for `linux-x86_64` only, so on this arm64 node the Gradle plugin
+    /// would otherwise die with `Exec format error`. With Rosetta exposed, that
+    /// one binary is translated and the rest of the build — JVM, Kotlin, dex —
+    /// still runs natively. See `LinuxConfig.rosetta` for what the image owes.
+    func runArguments(name: String, image: String, request: JobRunRequest) -> [String] {
+        var args = ["run", "--rm", "--name", name]
+        if let cpu = config.cpuCount { args += ["--cpus", String(cpu)] }
+        if let memory = config.memoryGB { args += ["--memory", "\(memory)g"] }
+        if let arch = config.arch { args += ["--arch", arch] }
+        if config.rosetta { args.append("--rosetta") }
+        for (key, value) in request.environment.sorted(by: { $0.key < $1.key }) {
+            args += ["--env", "\(key)=\(value)"]
+        }
+        args += ["--entrypoint", "/bin/bash", image, "-c", runnerScript(for: request)]
+        return args
     }
 
     /// The actions-runner image ships `run.sh` in the runner's home.
