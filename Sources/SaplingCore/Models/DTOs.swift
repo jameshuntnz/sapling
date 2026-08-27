@@ -41,6 +41,11 @@ public struct StatusResponse: Codable, Sendable {
     public var completedLast24h: Int
     /// Jobs that failed in the last 24 hours.
     public var failedLast24h: Int
+    /// Jobs GitHub cancelled in the last 24 hours.
+    ///
+    /// Counted apart from failures because they are not the node's doing, and
+    /// folding them together makes a working node look like a broken one.
+    public var cancelledLast24h: Int
     /// Repositories being polled, in `owner/repo` form.
     public var watchedRepos: [String]
     /// When GitHub was last polled successfully.
@@ -59,6 +64,7 @@ public struct StatusResponse: Codable, Sendable {
         runningJobs: Int,
         completedLast24h: Int,
         failedLast24h: Int,
+        cancelledLast24h: Int = 0,
         watchedRepos: [String],
         lastPollAt: Date?,
         lastPollError: String?,
@@ -71,6 +77,7 @@ public struct StatusResponse: Codable, Sendable {
         self.runningJobs = runningJobs
         self.completedLast24h = completedLast24h
         self.failedLast24h = failedLast24h
+        self.cancelledLast24h = cancelledLast24h
         self.watchedRepos = watchedRepos
         self.lastPollAt = lastPollAt
         self.lastPollError = lastPollError

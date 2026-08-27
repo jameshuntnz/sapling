@@ -163,6 +163,9 @@ installation_id = "7654321"
 private_key_path = "~/.sapling/github-app.pem"
 repos = []           # empty: every private repo the App installation grants
 poll_interval_seconds = 30
+# After 3 failed attempts the node gives up on a job. GitHub has no per-job
+# cancel, so telling it means cancelling the whole run — siblings included.
+cancel_run_when_exhausted = false
 
 [macos]
 enabled = true

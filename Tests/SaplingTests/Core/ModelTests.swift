@@ -36,10 +36,13 @@ struct ModelTests {
         #expect(!NodeStatus.offline.acceptsNewJobs)
     }
 
-    @Test("terminal states are exactly completed and failed")
+    @Test("terminal states are exactly completed, failed and cancelled")
     func terminalStates() {
         let terminal = JobStatus.allCases.filter(\.isTerminal)
-        #expect(Set(terminal) == [.completed, .failed])
+        #expect(Set(terminal) == [.completed, .failed, .cancelled])
+        // A cancellation is GitHub's decision, so it is the one finished state
+        // this node must never start over.
+        #expect(Set(JobStatus.allCases.filter(\.isRetryable)) == [.completed, .failed])
         // Nothing can both hold a slot and be finished.
         #expect(!JobStatus.allCases.contains { $0.isTerminal && $0.occupiesSlot })
     }

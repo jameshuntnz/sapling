@@ -76,12 +76,23 @@ extension NodeAgent {
             )
             if try await store.insertJobIfNew(record) {
                 Log.info("queued \(repo) #\(job.id) \"\(job.name)\" (\(platform.rawValue))")
-            } else if try await store.requeueJob(
-                id: record.id, failedBefore: Date().addingTimeInterval(-Self.requeueCooldown))
-            {
-                // GitHub still wants it run, so a local failure shouldn't
-                // strand it until GitHub's own timeout hours from now.
-                Log.info("re-queued \(repo) #\(job.id) after a local failure")
+                continue
+            }
+            // GitHub still wants it run, so a local failure shouldn't strand it
+            // until GitHub's own timeout hours from now — but only so often.
+            switch try await store.requeueJob(
+                id: record.id,
+                failedBefore: Date().addingTimeInterval(-Self.requeueCooldown),
+                maxAttempts: Self.maxJobAttempts
+            ) {
+            case .requeued(let attempt):
+                Log.info("re-queued \(repo) #\(job.id) after a local failure (attempt \(attempt))")
+            case .exhausted(let attempts):
+                Log.error(
+                    "giving up on \(repo) #\(job.id) after \(attempts) failed attempts on this node")
+                await handleExhaustedJob(record)
+            case .notEligible:
+                break
             }
         }
         return seen
@@ -129,9 +140,12 @@ extension NodeAgent {
         // Claim the slot in the database before anything can await, so the
         // next poll cycle can't see this job as still queued.
         do {
-            try await store.updateJobStatus(id: job.id, status: .provisioning, startedAt: Date())
+            let attempt = try await store.claimJob(id: job.id)
             try await store.appendEvent(
-                jobID: job.id, event: RunEventName.jobClaimed, detail: config.node.name)
+                jobID: job.id,
+                event: RunEventName.jobClaimed,
+                detail: attempt > 1 ? "\(config.node.name) (attempt \(attempt))" : config.node.name
+            )
         } catch {
             Log.error("could not claim job \(job.id): \(error.localizedDescription)")
             return

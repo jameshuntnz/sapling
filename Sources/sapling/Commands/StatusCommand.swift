@@ -52,6 +52,9 @@ struct Status: AsyncParsableCommand {
         print("  completed (24h)   \(Style.green(String(status.completedLast24h)))")
         print(
             "  failed (24h)      \(status.failedLast24h > 0 ? Style.red(String(status.failedLast24h)) : "0")")
+        if status.cancelledLast24h > 0 {
+            print("  cancelled (24h)   \(Style.dim(String(status.cancelledLast24h)))")
+        }
         print("")
 
         print(Style.bold("GitHub"))

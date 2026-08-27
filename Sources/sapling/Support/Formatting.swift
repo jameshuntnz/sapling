@@ -24,6 +24,7 @@ enum Style {
         case .failed: red(status.rawValue)
         case .running, .provisioning: blue(status.rawValue)
         case .cleanup: yellow(status.rawValue)
+        case .cancelled: dim(status.rawValue)
         case .queued: dim(status.rawValue)
         }
     }

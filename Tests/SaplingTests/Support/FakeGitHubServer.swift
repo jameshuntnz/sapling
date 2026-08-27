@@ -11,16 +11,19 @@ final class FakeGitHubState: @unchecked Sendable {
     private var _jobsRequests: [Int64] = []
     private var _jitBodies: [[String: Any]] = []
     private var _deletedRunners: [Int64] = []
+    private var _cancelledRuns: [Int64] = []
     private var _authAttempts = 0
 
     var jobsRequests: [Int64] { lock.withLock { _jobsRequests } }
     var jitBodies: [[String: Any]] { lock.withLock { _jitBodies } }
     var deletedRunners: [Int64] { lock.withLock { _deletedRunners } }
+    var cancelledRuns: [Int64] { lock.withLock { _cancelledRuns } }
     var authAttempts: Int { lock.withLock { _authAttempts } }
 
     func recordJobsRequest(_ runID: Int64) { lock.withLock { _jobsRequests.append(runID) } }
     func recordJIT(_ body: [String: Any]) { lock.withLock { _jitBodies.append(body) } }
     func recordDelete(_ id: Int64) { lock.withLock { _deletedRunners.append(id) } }
+    func recordCancelledRun(_ id: Int64) { lock.withLock { _cancelledRuns.append(id) } }
     func nextAuthAttempt() -> Int {
         lock.withLock {
             _authAttempts += 1
@@ -103,6 +106,11 @@ struct FakeGitHubServer {
                  "labels":["self-hosted","macos"],"started_at":"2026-08-24T10:00:00Z",
                  "completed_at":"2026-08-24T10:05:00Z","runner_name":"sap-macos-abc"}
                 """)
+        }
+
+        app.post("repos", ":owner", ":repo", "actions", "runs", ":runID", "cancel") { request -> Response in
+            state.recordCancelledRun(Int64(request.parameters.get("runID") ?? "0") ?? 0)
+            return Response(status: .accepted)
         }
 
         app.post("repos", ":owner", ":repo", "actions", "runners", "generate-jitconfig") {

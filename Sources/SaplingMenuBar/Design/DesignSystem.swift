@@ -13,6 +13,7 @@ enum Palette {
         case .failed: .red
         case .running, .provisioning: .blue
         case .cleanup: .orange
+        case .cancelled: .secondary
         case .queued: .secondary
         }
     }
@@ -32,6 +33,7 @@ enum Palette {
         case .running: "play.circle.fill"
         case .provisioning: "gearshape.circle.fill"
         case .cleanup: "trash.circle.fill"
+        case .cancelled: "slash.circle.fill"
         case .queued: "clock"
         }
     }

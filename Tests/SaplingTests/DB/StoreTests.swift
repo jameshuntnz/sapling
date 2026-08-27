@@ -183,8 +183,8 @@ struct RequeueTests {
         let store = try await makeStore()
         try await store.saveJob(failedJob("1", completedAt: Date().addingTimeInterval(-600)))
 
-        let requeued = try await store.requeueJob(id: "1", failedBefore: Date())
-        #expect(requeued)
+        let requeued = try await store.requeueJob(id: "1", failedBefore: Date(), maxAttempts: 3)
+        #expect(requeued == .requeued(attempt: 1))
 
         let job = try #require(try await store.job(id: "1"))
         #expect(job.status == .queued)
@@ -201,8 +201,8 @@ struct RequeueTests {
         try await store.saveJob(failedJob("1", completedAt: Date()))
 
         let tooSoon = try await store.requeueJob(
-            id: "1", failedBefore: Date().addingTimeInterval(-120))
-        #expect(!tooSoon)
+            id: "1", failedBefore: Date().addingTimeInterval(-120), maxAttempts: 3)
+        #expect(tooSoon == .notEligible)
         #expect(try await store.job(id: "1")?.status == .failed)
     }
 
@@ -216,7 +216,7 @@ struct RequeueTests {
                 Job(
                     id: id, nodeID: "mini", repo: "acme/widgets", platform: .linux,
                     labels: [], status: status))
-            #expect(try await store.requeueJob(id: id, failedBefore: Date()) == false)
+            #expect(try await store.requeueJob(id: id, failedBefore: Date(), maxAttempts: 3) == .notEligible)
             #expect(try await store.job(id: id)?.status == status)
         }
     }
@@ -224,7 +224,7 @@ struct RequeueTests {
     @Test("ignores a job it has never seen")
     func ignoresUnknownJob() async throws {
         let store = try await makeStore()
-        #expect(try await store.requeueJob(id: "nope", failedBefore: Date()) == false)
+        #expect(try await store.requeueJob(id: "nope", failedBefore: Date(), maxAttempts: 3) == .notEligible)
     }
 
     /// A completed job is terminal too, but GitHub would not still be
@@ -236,6 +236,8 @@ struct RequeueTests {
         job.status = .completed
         job.exitReason = nil
         try await store.saveJob(job)
-        #expect(try await store.requeueJob(id: "1", failedBefore: Date()))
+        #expect(
+            try await store.requeueJob(id: "1", failedBefore: Date(), maxAttempts: 3) == .requeued(attempt: 1)
+        )
     }
 }

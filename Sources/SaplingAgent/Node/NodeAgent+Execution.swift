@@ -110,10 +110,20 @@ extension NodeAgent {
         case .success:
             status = .completed
             reason = nil
-        case .failure(let conclusion):
+        case .concluded("cancelled"):
+            status = .cancelled
+            reason = "GitHub cancelled this job"
+        case .concluded(let conclusion):
             status = .failed
             reason = "GitHub reported conclusion: \(conclusion)"
-        case .notFinished:
+        case .stillQueued:
+            // Not a failure: every job carries the same labels, so the runner
+            // we started for this job took a different one that matched. This
+            // job is still waiting on GitHub, so put it back rather than
+            // recording a failure nothing actually did.
+            await handOffToQueue(job: job, events: events)
+            return
+        case .unknown:
             status = .failed
             reason =
                 outcome.message.map { "runner exited without the job completing: \($0)" }
@@ -131,6 +141,27 @@ extension NodeAgent {
             completedAt: Date()
         )
         Log.info("job \(job.id) \(status.rawValue)\(reason.map { " (\($0))" } ?? "")")
+    }
+
+    /// Put a job back in the queue because our runner ran a different one.
+    ///
+    /// Bounded by the same attempt ceiling as any other requeue: if this node
+    /// somehow never manages to run this particular job, it should stop trying
+    /// rather than provision a VM for it indefinitely.
+    private func handOffToQueue(job: Job, events: any EventSink) async {
+        let detail = "the runner took a different queued job; returning this one to the queue"
+        switch (try? await store.returnJobToQueue(id: job.id, maxAttempts: Self.maxJobAttempts))
+            ?? .notEligible
+        {
+        case .requeued(let attempt):
+            await events.record(RunEventName.jobRequeued, detail: detail)
+            Log.info("job \(job.id) returned to the queue (attempt \(attempt) next)")
+        case .exhausted(let attempts):
+            Log.error("giving up on job \(job.id) after \(attempts) attempts on this node")
+            await handleExhaustedJob(job)
+        case .notEligible:
+            break
+        }
     }
 
     func jobEnvironment(for platform: JobPlatform) async -> [String: String] {
@@ -162,11 +193,15 @@ extension NodeAgent {
 
 extension NodeAgent {
     /// What GitHub says became of a job.
-    enum RemoteConclusion {
+    enum RemoteConclusion: Equatable {
         case success
-        case failure(String)
-        /// GitHub has no result: the job did not run to completion here.
-        case notFinished
+        /// GitHub finished the job, with this conclusion.
+        case concluded(String)
+        /// GitHub still has the job waiting for a runner, so whatever our
+        /// runner did, it wasn't this.
+        case stillQueued
+        /// No answer: GitHub unreachable, or the job never concluded.
+        case unknown
     }
 
     /// Ask GitHub how the job ended, allowing for its result lagging slightly
@@ -184,25 +219,34 @@ extension NodeAgent {
     /// - Returns: What GitHub says became of the job.
     func remoteConclusion(
         for job: Job,
-        attempts: Int = NodeAgent.conclusionAttempts,
-        retryDelay: Duration = NodeAgent.conclusionRetryDelay
+        attempts: Int? = nil,
+        retryDelay: Duration? = nil
     ) async -> RemoteConclusion {
-        guard let jobID = Int64(job.id) else { return .notFinished }
+        let attempts = attempts ?? conclusionAttempts
+        let retryDelay = retryDelay ?? conclusionRetryDelay
+        guard let jobID = Int64(job.id) else { return .unknown }
 
+        var lastSeenQueued = false
         for attempt in 0..<attempts {
             if attempt > 0 {
                 try? await Task.sleep(for: retryDelay)
             }
             guard let remote = try? await github.job(repo: job.repo, jobID: jobID) else { continue }
-            guard remote.isCompleted else { continue }
+            guard remote.isCompleted else {
+                // Still waiting for a runner after our runner has exited means
+                // our runner ran something else. Not decided until the retries
+                // are done, in case GitHub is simply lagging.
+                lastSeenQueued = remote.isQueued
+                continue
+            }
 
             switch remote.conclusion {
             case "success": return .success
-            case let conclusion?: return .failure(conclusion)
-            case nil: return .notFinished
+            case let conclusion?: return .concluded(conclusion)
+            case nil: return .unknown
             }
         }
-        return .notFinished
+        return lastSeenQueued ? .stillQueued : .unknown
     }
 
     /// The image this job runs in, or `nil` for macOS jobs which have none.

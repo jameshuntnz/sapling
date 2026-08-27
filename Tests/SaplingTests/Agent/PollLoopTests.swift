@@ -162,14 +162,13 @@ struct JobConclusionTests {
         }
     }
 
-    /// Job 424242 is unknown to the fake API — the same shape as a job GitHub
-    /// still has queued because the runner never picked it up.
-    @Test("reports notFinished when GitHub has no result")
-    func notFinishedWhenGitHubHasNoResult() async throws {
+    /// Job 424242 is unknown to the fake API, so there is nothing to go on.
+    @Test("reports unknown when GitHub has no result")
+    func unknownWhenGitHubHasNoResult() async throws {
         try await withFakeGitHub { agent in
             let job = Job(
                 id: "424242", repo: "acme/widgets", platform: .macos, labels: [], status: .running)
-            guard case .notFinished = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
+            guard case .unknown = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
             else {
                 Issue.record("a job GitHub has no result for must not read as finished")
                 return
@@ -183,9 +182,9 @@ struct JobConclusionTests {
             let job = Job(
                 id: "not-a-number", repo: "acme/widgets", platform: .macos, labels: [],
                 status: .running)
-            guard case .notFinished = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
+            guard case .unknown = await agent.remoteConclusion(for: job, attempts: 1, retryDelay: .zero)
             else {
-                Issue.record("expected .notFinished")
+                Issue.record("expected .unknown")
                 return
             }
         }

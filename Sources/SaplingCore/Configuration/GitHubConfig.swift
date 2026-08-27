@@ -32,6 +32,15 @@ public struct GitHubConfig: Codable, Sendable {
     ///
     /// Overridable for GitHub Enterprise, and for tests.
     public var apiBaseURL: String
+    /// Cancel the whole workflow run when this node gives up on one of its
+    /// jobs.
+    ///
+    /// Off by default, and the default is the safe one. GitHub has no
+    /// per-job cancel — the only lever is cancelling the entire run — so
+    /// turning this on to stop one stuck job also kills its siblings,
+    /// including ones that were running perfectly well on another platform.
+    /// Left off, an abandoned job simply waits out GitHub's own timeout.
+    public var cancelRunWhenExhausted: Bool
 
     enum CodingKeys: String, CodingKey {
         case auth, token, repos
@@ -40,6 +49,7 @@ public struct GitHubConfig: Codable, Sendable {
         case privateKeyPath = "private_key_path"
         case pollIntervalSeconds = "poll_interval_seconds"
         case apiBaseURL = "api_base_url"
+        case cancelRunWhenExhausted = "cancel_run_when_exhausted"
     }
 
     /// Creates a GitHub configuration.
@@ -51,6 +61,7 @@ public struct GitHubConfig: Codable, Sendable {
         privateKeyPath: String? = nil,
         repos: [String] = [],
         pollIntervalSeconds: Int = 30,
+        cancelRunWhenExhausted: Bool = false,
         apiBaseURL: String = "https://api.github.com"
     ) {
         self.auth = auth
@@ -61,6 +72,7 @@ public struct GitHubConfig: Codable, Sendable {
         self.repos = repos
         self.pollIntervalSeconds = pollIntervalSeconds
         self.apiBaseURL = apiBaseURL
+        self.cancelRunWhenExhausted = cancelRunWhenExhausted
     }
 
     /// Creates a GitHub configuration.
@@ -74,6 +86,8 @@ public struct GitHubConfig: Codable, Sendable {
         repos = try c.decodeIfPresent([String].self, forKey: .repos) ?? []
         pollIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .pollIntervalSeconds) ?? 30
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? "https://api.github.com"
+        cancelRunWhenExhausted =
+            try c.decodeIfPresent(Bool.self, forKey: .cancelRunWhenExhausted) ?? false
     }
 
     /// The private key path with `~` expanded, or `nil` if unset.

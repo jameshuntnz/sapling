@@ -61,9 +61,16 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
     var exitReason: String?
     var imageRef: String?
     var updatedAt: Date
+    /// How many times this node has started the job, counting from one.
+    ///
+    /// One past the ceiling means this node gave up, which is what stops the
+    /// poll loop reporting the same exhaustion on every cycle. Storage-only:
+    /// the API contract has no need for it, but requeueing without it has no
+    /// way to stop.
+    var attempts: Int
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, platform, labels, status, name
+        case id, repo, platform, labels, status, name, attempts
         case imageRef = "image_ref"
         case nodeId = "node_id"
         case workflowRunId = "workflow_run_id"
@@ -74,7 +81,7 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
         case updatedAt = "updated_at"
     }
 
-    init(_ job: Job, updatedAt: Date = Date()) {
+    init(_ job: Job, updatedAt: Date = Date(), attempts: Int = 0) {
         id = job.id
         nodeId = job.nodeID
         repo = job.repo
@@ -89,6 +96,7 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
         exitReason = job.exitReason
         imageRef = job.imageRef
         self.updatedAt = updatedAt
+        self.attempts = attempts
     }
 
     var model: Job {

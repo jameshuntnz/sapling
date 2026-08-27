@@ -112,9 +112,10 @@ struct CancellationTests {
             // This is what the next poll cycle does with what it is holding.
             await agent.reconcileAbandonedJobs(stillQueued: ["acme/widgets": []])
 
-            try await waitUntil { (try? await store.job(id: "9001"))?.status == .failed }
+            try await waitUntil { (try? await store.job(id: "9001"))?.status == .cancelled }
             let job = try #require(try await store.job(id: "9001"))
-            #expect(job.status == .failed)
+            // Cancelled, not failed: nothing here went wrong.
+            #expect(job.status == .cancelled)
             #expect(job.exitReason?.contains("cancelled") == true)
             #expect(job.completedAt != nil)
             #expect(await provider.wasTornDown())
@@ -141,7 +142,7 @@ struct CancellationTests {
             try await agent.pollOnce()
 
             let job = try #require(try await store.job(id: "9001"))
-            #expect(job.status == .failed)
+            #expect(job.status == .cancelled)
             #expect(job.exitReason?.contains("before it started here") == true)
             #expect(await provider.hasStarted() == false)
         }
@@ -187,7 +188,7 @@ struct CancellationTests {
 
             try await agent.pollOnce()
             let job = try #require(try await store.job(id: "9099"))
-            #expect(job.status == .failed)
+            #expect(job.status == .cancelled)
             #expect(job.exitReason?.contains("no longer exists") == true)
         }
     }

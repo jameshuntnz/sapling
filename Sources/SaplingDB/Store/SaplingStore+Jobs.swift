@@ -109,40 +109,6 @@ extension SaplingStore {
         }
     }
 
-    /// Put a job back in the queue after this node failed to run it.
-    ///
-    /// GitHub is the authority on whether a job still needs running. When it
-    /// still reports one as queued but this node recorded a failure — a VM
-    /// that wouldn't boot, an egress filter that couldn't be applied — the job
-    /// would otherwise sit unclaimed until GitHub's own timeout, because
-    /// discovery skips every id it has already seen.
-    ///
-    /// - Parameters:
-    ///   - id: The job to requeue.
-    ///   - cutoff: Only requeue if it finished before this instant. A
-    ///     cooldown, so a job failing instantly can't spin.
-    /// - Returns: Whether the job was requeued.
-    /// - Throws: If the database cannot be written.
-    @discardableResult
-    public func requeueJob(id: String, failedBefore cutoff: Date) async throws -> Bool {
-        try await writer.write { db in
-            guard var record = try JobRecord.fetchOne(db, key: id) else { return false }
-            guard let status = JobStatus(rawValue: record.status), status.isTerminal else {
-                return false
-            }
-            let finishedAt = record.completedAt ?? record.updatedAt
-            guard finishedAt <= cutoff else { return false }
-
-            record.status = JobStatus.queued.rawValue
-            record.startedAt = nil
-            record.completedAt = nil
-            record.exitReason = nil
-            record.updatedAt = Date()
-            try record.update(db)
-            return true
-        }
-    }
-
     /// Count of slot-holding jobs per platform, the number the scheduler
     /// checks before claiming anything new.
     public func slotsInUse() async throws -> [JobPlatform: Int] {
@@ -218,8 +184,11 @@ extension SaplingStore {
     public func pruneJobs(olderThan cutoff: Date) async throws -> Int {
         try await writer.write { db in
             try db.execute(
-                sql: "DELETE FROM jobs WHERE status IN (?, ?) AND updated_at < ?",
-                arguments: [JobStatus.completed.rawValue, JobStatus.failed.rawValue, cutoff]
+                sql: "DELETE FROM jobs WHERE status IN (?, ?, ?) AND updated_at < ?",
+                arguments: [
+                    JobStatus.completed.rawValue, JobStatus.failed.rawValue,
+                    JobStatus.cancelled.rawValue, cutoff,
+                ]
             )
             return db.changesCount
         }

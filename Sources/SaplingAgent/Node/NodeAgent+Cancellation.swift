@@ -71,8 +71,7 @@ extension NodeAgent {
     private func abandon(_ job: Job, reason: String) async {
         guard let task = runningJobs[job.id] else { return }
         Log.warn("job \(job.id): \(reason)")
-        try? await store.appendEvent(
-            jobID: job.id, event: RunEventName.jobCancelled, detail: reason)
+        await recordEvent(job.id, RunEventName.jobCancelled, reason)
 
         // Still holds its slot: the VM is not gone until teardown says so, and
         // handing the slot over early is how a third VM gets cloned.
@@ -88,9 +87,36 @@ extension NodeAgent {
             // outcome through `finalize`, and that one is the truthful answer.
             guard (try? await store.job(id: job.id))?.status == .cleanup else { return }
             try? await store.updateJobStatus(
-                id: job.id, status: .failed, exitReason: reason, completedAt: Date())
+                id: job.id, status: .cancelled, exitReason: reason, completedAt: Date())
             Log.info("job \(job.id) released after cancellation")
         }
+    }
+
+    /// This node has stopped trying, so tell GitHub if we're allowed to.
+    ///
+    /// GitHub has no per-job cancel: the only endpoint is "cancel this run",
+    /// which takes the job's siblings with it — including ones running happily
+    /// on the other platform. That is too destructive to do on our own
+    /// judgement, so it happens only when the config asks for it. Left off, the
+    /// job simply waits out GitHub's own timeout, which costs nothing here.
+    func handleExhaustedJob(_ job: Job) async {
+        await recordEvent(job.id, RunEventName.jobFailed, "no attempts left on this node")
+        guard config.github.cancelRunWhenExhausted else { return }
+        guard let runID = job.workflowRunID.flatMap(Int64.init) else { return }
+        do {
+            try await github.cancelRun(repo: job.repo, runID: runID)
+            Log.warn("cancelled \(job.repo) run \(runID) — no attempts left for job \(job.id)")
+            await recordEvent(
+                job.id, RunEventName.jobCancelled,
+                "cancelled workflow run \(runID) on GitHub, along with its other jobs")
+        } catch {
+            Log.error("could not cancel run \(runID): \(error.localizedDescription)")
+        }
+    }
+
+    /// Append an event, which must never be able to fail anything.
+    func recordEvent(_ jobID: String, _ event: String, _ detail: String?) async {
+        try? await store.appendEvent(jobID: jobID, event: event, detail: detail)
     }
 
     /// Jobs still waiting here that GitHub finished without us.
@@ -105,10 +131,9 @@ extension NodeAgent {
             guard let live = stillQueued[job.repo], !live.contains(job.id) else { continue }
             guard let reason = await retirementReason(for: job) else { continue }
             Log.info("dropping queued job \(job.id): \(reason)")
-            try? await store.appendEvent(
-                jobID: job.id, event: RunEventName.jobCancelled, detail: reason)
+            await recordEvent(job.id, RunEventName.jobCancelled, reason)
             try? await store.updateJobStatus(
-                id: job.id, status: .failed, exitReason: reason, completedAt: Date())
+                id: job.id, status: .cancelled, exitReason: reason, completedAt: Date())
         }
     }
 

@@ -66,6 +66,16 @@ enum SaplingMigrations {
             }
         }
 
+        // Requeueing had no ceiling: a job GitHub keeps reporting as queued
+        // was retried every cooldown forever, so a permanently broken base
+        // image meant an endless clone-boot-fail loop rather than a job that
+        // gives up and says why.
+        migrator.registerMigration("v3_job_attempts") { db in
+            try db.alter(table: "jobs") { t in
+                t.add(column: "attempts", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return migrator
     }
 }

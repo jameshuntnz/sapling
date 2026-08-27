@@ -66,6 +66,7 @@ struct ControlPlane: Sendable {
             runningJobs: (inUse[.macos] ?? 0) + (inUse[.linux] ?? 0),
             completedLast24h: try await store.countJobs(status: .completed, since: dayAgo),
             failedLast24h: try await store.countJobs(status: .failed, since: dayAgo),
+            cancelledLast24h: try await store.countJobs(status: .cancelled, since: dayAgo),
             watchedRepos: watched,
             lastPollAt: lastPollRaw.flatMap { ISO8601DateFormatter().date(from: $0) },
             lastPollError: try await store.state(SaplingStore.StateKey.lastPollError),

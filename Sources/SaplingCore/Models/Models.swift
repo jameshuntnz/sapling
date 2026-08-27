@@ -29,20 +29,39 @@ public enum JobStatus: String, Codable, Sendable, CaseIterable {
     case completed
     /// Finished unsuccessfully, or could not be run at all.
     case failed
+    /// GitHub withdrew the job, so it never ran to a result here.
+    ///
+    /// Distinct from `failed` because nothing went wrong: counting a
+    /// cancellation as a failure is how a healthy node comes to look like a
+    /// broken one.
+    case cancelled
 
     /// Whether this state is final.
     ///
     /// Terminal jobs are never rescheduled and never hold a slot.
     public var isTerminal: Bool {
-        self == .completed || self == .failed
+        switch self {
+        case .completed, .failed, .cancelled: true
+        case .queued, .provisioning, .running, .cleanup: false
+        }
     }
 
     /// Whether a job in this state occupies a concurrency slot on the node.
     public var occupiesSlot: Bool {
         switch self {
         case .provisioning, .running, .cleanup: true
-        case .queued, .completed, .failed: false
+        case .queued, .completed, .failed, .cancelled: false
         }
+    }
+
+    /// Whether this node should ever start the job again.
+    ///
+    /// Every finished job except a cancelled one: a local failure is this
+    /// node's problem and worth another attempt, whereas a cancellation is
+    /// GitHub's decision and stands. Retrying a cancelled job would clone a VM
+    /// for work that has been called off.
+    public var isRetryable: Bool {
+        isTerminal && self != .cancelled
     }
 }
 
@@ -225,6 +244,8 @@ public enum RunEventName {
     public static let jobFailed = "job_failed"
     /// GitHub withdrew the job, so the node stopped running it.
     public static let jobCancelled = "job_cancelled"
+    /// The job went back in the queue for another attempt.
+    public static let jobRequeued = "job_requeued"
     /// Teardown of the VM or container began.
     public static let cleanupStarted = "cleanup_started"
     /// Teardown finished and the slot was released.

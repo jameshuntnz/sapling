@@ -40,12 +40,26 @@ public actor NodeAgent {
     /// retries at a sane rate rather than every poll cycle.
     static let requeueCooldown: TimeInterval = 120
 
-    /// How many times to ask GitHub for a job's conclusion before concluding it never finished.
+    /// How many times this node will start any one job before giving up.
+    ///
+    /// Requeueing had no ceiling, so a job GitHub keeps reporting as queued —
+    /// against a base image that will never boot, say — was retried every
+    /// cooldown until GitHub's own timeout hours later, cloning a VM each
+    /// time. Three attempts is enough to ride out something transient and few
+    /// enough to stop a broken node burning a morning.
+    static let maxJobAttempts = 3
+
+    /// How many times to ask GitHub for a job's conclusion before giving up on getting one.
     ///
     /// GitHub records the result a moment after the runner exits, so a single immediate check races that.
-    static let conclusionAttempts = 5
+    let conclusionAttempts: Int
     /// Gap between those attempts.
-    static let conclusionRetryDelay: Duration = .seconds(3)
+    let conclusionRetryDelay: Duration
+
+    /// Defaults for the two above, used everywhere except tests that would
+    /// otherwise spend fifteen seconds waiting for a fake to say "no".
+    static let defaultConclusionAttempts = 5
+    static let defaultConclusionRetryDelay: Duration = .seconds(3)
 
     /// Samples the hardware, so the UI can show what the node is doing.
     public let metrics = MetricsCollector()
@@ -76,8 +90,12 @@ public actor NodeAgent {
         config: SaplingConfig,
         store: SaplingStore,
         macProvider: (any JobProvider)?,
-        linuxProvider: (any JobProvider)?
+        linuxProvider: (any JobProvider)?,
+        conclusionAttempts: Int = NodeAgent.defaultConclusionAttempts,
+        conclusionRetryDelay: Duration = NodeAgent.defaultConclusionRetryDelay
     ) {
+        self.conclusionAttempts = conclusionAttempts
+        self.conclusionRetryDelay = conclusionRetryDelay
         self.config = config
         self.store = store
         self.github = GitHubClient(config: config.github)
