@@ -82,6 +82,33 @@ extension SaplingStore {
         }
     }
 
+    /// Records which image a job actually ran in.
+    ///
+    /// Kept separate from `updateJobStatus` because it is answered once, at
+    /// dispatch, and never revised — a job that ran in an image did so in that
+    /// image, whatever the config says later.
+    public func setJobImageRef(id: String, imageRef: String) async throws {
+        try await writer.write { db in
+            guard var record = try JobRecord.fetchOne(db, key: id) else { return }
+            record.imageRef = imageRef
+            record.updatedAt = Date()
+            try record.update(db)
+        }
+    }
+
+    /// Image refs used by jobs updated since a cutoff.
+    ///
+    /// Drives image retention: anything not in this set is a build nothing has
+    /// needed lately.
+    public func recentJobImageRefs(since cutoff: Date) async throws -> [String] {
+        try await writer.read { db in
+            try JobRecord
+                .filter(Column("updated_at") >= cutoff)
+                .fetchAll(db)
+                .compactMap(\.imageRef)
+        }
+    }
+
     /// Put a job back in the queue after this node failed to run it.
     ///
     /// GitHub is the authority on whether a job still needs running. When it

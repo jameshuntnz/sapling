@@ -57,6 +57,15 @@ enum SaplingMigrations {
             }
         }
 
+        // Additive and nullable, so an existing database keeps every row and
+        // a job that predates repository-defined images simply has no image
+        // recorded — which is the truth about it.
+        migrator.registerMigration("v2_job_image_ref") { db in
+            try db.alter(table: "jobs") { t in
+                t.add(column: "image_ref", .text)
+            }
+        }
+
         return migrator
     }
 }

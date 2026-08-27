@@ -122,6 +122,17 @@ public struct LinuxConfig: Codable, Sendable {
     /// alone and turn on `rosetta` instead — that keeps the JVM, compilers and
     /// everything else running natively.
     public var arch: String?
+    /// Whether this node will build images defined by the repositories it runs.
+    ///
+    /// A repository's Dockerfile executes arbitrary commands on the node at
+    /// build time, outside the job container. Sapling already assumes trusted
+    /// job code and refuses public repos, so this fits that model — but it is
+    /// a wider grant than running a job, and a node can decline it.
+    public var buildImages: Bool
+    /// Directory, within each repository, holding image definitions.
+    ///
+    /// One subdirectory per image: `<imagesPath>/<name>/Dockerfile`.
+    public var imagesPath: String
     /// Whether to expose Rosetta translation inside the container.
     ///
     /// Apple's `container` registers Rosetta as a binfmt handler, so x86-64
@@ -141,6 +152,8 @@ public struct LinuxConfig: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case enabled, labels, arch, rosetta
         case defaultImage = "default_image"
+        case buildImages = "build_images"
+        case imagesPath = "images_path"
         case maxConcurrent = "max_concurrent"
         case jobTimeoutSeconds = "job_timeout_seconds"
         case cpuCount = "cpu_count"
@@ -157,7 +170,9 @@ public struct LinuxConfig: Codable, Sendable {
         cpuCount: Int? = nil,
         memoryGB: Int? = nil,
         arch: String? = nil,
-        rosetta: Bool = false
+        rosetta: Bool = false,
+        buildImages: Bool = true,
+        imagesPath: String = ".sapling/images"
     ) {
         self.enabled = enabled
         self.defaultImage = defaultImage
@@ -168,6 +183,8 @@ public struct LinuxConfig: Codable, Sendable {
         self.memoryGB = memoryGB
         self.arch = arch
         self.rosetta = rosetta
+        self.buildImages = buildImages
+        self.imagesPath = imagesPath
     }
 
     /// Creates a platform configuration.
@@ -184,5 +201,7 @@ public struct LinuxConfig: Codable, Sendable {
         memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
         arch = try c.decodeIfPresent(String.self, forKey: .arch)
         rosetta = try c.decodeIfPresent(Bool.self, forKey: .rosetta) ?? false
+        buildImages = try c.decodeIfPresent(Bool.self, forKey: .buildImages) ?? true
+        imagesPath = try c.decodeIfPresent(String.self, forKey: .imagesPath) ?? ".sapling/images"
     }
 }

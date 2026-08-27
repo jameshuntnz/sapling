@@ -172,10 +172,12 @@ ssh_username = "admin"
 
 [linux]
 enabled = true
-default_image = "ghcr.io/actions/actions-runner:latest"
+default_image = "ghcr.io/actions/actions-runner:latest"  # used when a job names none
 max_concurrent = 2
 rosetta = false                   # translate x86-64 binaries — Android's aapt2 needs it
                                   # requires Rosetta on the host: see below
+build_images = true               # build images the repos define (see below)
+images_path = ".sapling/images"   # where in each repo those definitions live
 # arch = "arm64"                  # only to run a foreign-architecture image outright
 
 [network]
@@ -196,7 +198,39 @@ auto_apply = false       # even when true, only applies while idle
 
 ---
 
-## Rosetta, for toolchains with no arm64 build
+## Repository-defined images
+
+`ubuntu-latest` is not Ubuntu — it is a GitHub-maintained image preloaded with
+five JDKs, the Android SDK, `yq` and much else, and workflows depend on all of
+it without ever saying so. Sapling's Linux default is the bare runner agent, so
+each repository declares the images its own jobs need:
+
+```
+.sapling/images/
+  android/Dockerfile
+  release-tools/Dockerfile
+```
+
+A job asks for one by label. GitHub's REST API does not expose a job's
+`container:` key, so labels are the only channel available:
+
+```yaml
+runs-on: [self-hosted, linux, arm64, image:android]
+```
+
+The node strips `image:*` before deciding eligibility, reads that directory at
+the job's own commit, and builds it. **The cache key is the directory's git
+tree SHA**, which is what makes this work without a registry: git already
+hashes the directory's exact contents, so an image rebuilds when — and only
+when — its definition changes, and an ordinary commit to application code is a
+cache hit. A job naming no image gets `default_image`.
+
+Images are per-purpose, not per-repo. A repository with a Node client and an
+Android app should define two small images rather than one carrying both
+toolchains. Images sharing a `FROM` share those layers on disk, so the base is
+paid for once.
+
+### Rosetta, for toolchains with no arm64 build
 
 Some build tools have no arm64 Linux binary at all. Android's `aapt2` is the
 one that bites: Google publishes it for `linux-x86_64` only, and the Gradle
@@ -218,6 +252,18 @@ sudo softwareupdate --install-rosetta --agree-to-license
 
 The daemon refuses to start when `rosetta = true` and it is missing, rather
 than letting the job fail with an elf loader error that mentions neither.
+
+Two things worth knowing before enabling this:
+
+- **A repository's Dockerfile executes on the node**, at build time, outside
+  the job container. That is consistent with Sapling assuming trusted job code
+  and refusing public repos, but it is a wider grant than running a job.
+  `build_images = false` declines it.
+- **A changed Dockerfile blocks the next job** that asks for it, for as long as
+  the build takes. Subsequent jobs hit the cache.
+
+Unused built images are pruned after 30 days, by reference rather than age — an
+image a job still points at is kept however old it is.
 
 ## Open decisions
 

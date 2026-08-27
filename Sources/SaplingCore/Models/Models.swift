@@ -121,6 +121,12 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
     public var completedAt: Date?
     /// Why it ended the way it did, when that isn't obvious from `status`.
     public var exitReason: String?
+    /// Image the job actually ran in, once resolved.
+    ///
+    /// Recorded rather than recomputed so the answer survives a restart and a
+    /// later config change — "which image was this built in" has to stay
+    /// answerable for a job that already ran.
+    public var imageRef: String?
 
     /// Creates a job record.
     public init(
@@ -135,7 +141,8 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
         queuedAt: Date? = nil,
         startedAt: Date? = nil,
         completedAt: Date? = nil,
-        exitReason: String? = nil
+        exitReason: String? = nil,
+        imageRef: String? = nil
     ) {
         self.id = id
         self.nodeID = nodeID
@@ -149,6 +156,7 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.exitReason = exitReason
+        self.imageRef = imageRef
     }
 
     /// How long the job has been running, or how long it ran.
@@ -203,6 +211,12 @@ public enum RunEventName {
     public static let runnerRegistered = "runner_registered"
     /// The runner process started.
     public static let runnerStarted = "runner_started"
+    /// A repository-defined image needed building before the job could start.
+    public static let imageBuildStarted = "image_build_started"
+    /// That image finished building and is cached for later jobs.
+    public static let imageBuildFinished = "image_build_finished"
+    /// The image could not be built, so the job never ran.
+    public static let imageBuildFailed = "image_build_failed"
     /// A Linux container started.
     public static let containerStarted = "container_started"
     /// The job finished successfully.

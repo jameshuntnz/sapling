@@ -32,6 +32,12 @@ extension NodeAgent {
         }
 
         do {
+            // Resolved before the runner is registered: building an image can
+            // take minutes, and a JIT runner minted first would be sitting in
+            // the repo's runner list for all of it, eligible to pick up some
+            // other queued job while this one is still waiting on its image.
+            let image = try await resolveImage(for: job, events: events)
+
             let labels = job.platform == .macos ? config.macos.labels : config.linux.labels
             let jitConfig = try await github.jitConfig(
                 repo: job.repo,
@@ -40,6 +46,7 @@ extension NodeAgent {
             )
 
             try await store.updateJobStatus(id: job.id, status: .running)
+            if let image { try? await store.setJobImageRef(id: job.id, imageRef: image) }
 
             let request = JobRunRequest(
                 jobID: job.id,
@@ -47,7 +54,7 @@ extension NodeAgent {
                 runnerName: runnerName,
                 jitConfig: jitConfig,
                 labels: labels,
-                image: job.platform == .linux ? config.linux.defaultImage : nil,
+                image: image,
                 environment: await jobEnvironment(for: job.platform),
                 bootTimeout: .seconds(config.macos.bootTimeoutSeconds),
                 jobTimeout: .seconds(
@@ -187,5 +194,24 @@ extension NodeAgent {
             }
         }
         return .notFinished
+    }
+
+    /// The image this job runs in, or `nil` for macOS jobs which have none.
+    ///
+    /// A job that names no image never costs an API call — the node's default
+    /// is returned directly. Only an `image:` selector triggers the lookup of
+    /// the commit the image must be built from.
+    func resolveImage(for job: Job, events: any EventSink) async throws -> String? {
+        guard job.platform == .linux else { return nil }
+
+        let selector = RunnerImageSelector.split(job.labels).image
+        guard let selector else { return config.linux.defaultImage }
+
+        // head_sha isn't carried on the queued-job record, and re-reading the
+        // job is cheaper than a column that would be wrong after a re-run.
+        let headSha = try? await github.job(repo: job.repo, jobID: Int64(job.id) ?? -1).headSha
+        let builder = RunnerImageBuilder(config: config.linux, github: github)
+        return try await builder.resolve(
+            imageName: selector, repo: job.repo, ref: headSha, events: events)
     }
 }

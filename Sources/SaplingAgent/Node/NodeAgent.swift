@@ -11,6 +11,11 @@ import SaplingDB
 public actor NodeAgent {
     /// Stable identifier for this node.
     public nonisolated let nodeID: String
+    /// How long an unused built image is kept before housekeeping removes it.
+    ///
+    /// Long enough that a project releasing fortnightly still gets a cache hit.
+    static let imageRetentionDays = 30
+
     let config: SaplingConfig
     let store: SaplingStore
     let github: GitHubClient

@@ -63,9 +63,12 @@ extension NodeAgent {
     /// Which platform, if any, can run a job with these labels.
     ///
     /// Matches GitHub's own rule: a runner is eligible when its label set is
-    /// a superset of the job's.
+    /// a superset of the job's — with `image:` selectors removed first, since
+    /// they name a container image rather than a capability the node has to
+    /// advertise. Leaving one in would make every job that asks for an image
+    /// ineligible everywhere.
     func platform(matching labels: [String]) -> JobPlatform? {
-        let requested = Set(labels)
+        let requested = Set(RunnerImageSelector.split(labels).capabilities)
         if config.macos.enabled, requested.isSubset(of: Set(config.macos.labels)) {
             return .macos
         }

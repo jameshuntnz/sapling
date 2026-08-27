@@ -59,10 +59,12 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
     var startedAt: Date?
     var completedAt: Date?
     var exitReason: String?
+    var imageRef: String?
     var updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case id, repo, platform, labels, status, name
+        case imageRef = "image_ref"
         case nodeId = "node_id"
         case workflowRunId = "workflow_run_id"
         case queuedAt = "queued_at"
@@ -85,6 +87,7 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
         startedAt = job.startedAt
         completedAt = job.completedAt
         exitReason = job.exitReason
+        imageRef = job.imageRef
         self.updatedAt = updatedAt
     }
 
@@ -101,7 +104,8 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
             queuedAt: queuedAt,
             startedAt: startedAt,
             completedAt: completedAt,
-            exitReason: exitReason
+            exitReason: exitReason,
+            imageRef: imageRef
         )
     }
 
