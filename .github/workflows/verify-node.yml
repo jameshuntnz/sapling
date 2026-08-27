@@ -15,6 +15,11 @@ on:
         description: "A tailnet address that jobs must NOT reach"
         required: true
         default: "100.66.217.76"
+      stress:
+        description: "Also run the concurrency stress test (slow)"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   # --- TESTING.md phase 2 ---------------------------------------------------
@@ -88,7 +93,13 @@ jobs:
   # --- TESTING.md phase 5 ---------------------------------------------------
   # Apple allows two concurrent macOS VMs. Three at once must never produce
   # 3/2; the third waits. Watch `sapling status` while this runs.
+  #
+  # Off by default. Three jobs that sleep 90s each, on a node with two macOS
+  # slots, means everything else — including the egress checks, which are the
+  # reason to run this workflow — queues behind them for ten minutes. The cap
+  # it verifies changes only when the scheduler does.
   concurrency-limit:
+    if: inputs.stress
     strategy:
       fail-fast: false
       matrix:
