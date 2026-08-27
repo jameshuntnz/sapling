@@ -257,5 +257,5 @@ public enum SaplingVersion {
     /// attempt used "0.1.0", which is a *stable* version, so every
     /// `0.1.0-dev.N` release read as older and the node sat there reporting
     /// itself up to date.
-    public static let current = "0.0.0-dev"
+    public static let current = "0.1.0"
 }
