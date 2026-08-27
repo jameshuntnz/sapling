@@ -97,6 +97,21 @@ string — a good way to lose a release. Semver ignores build metadata for
 precedence, so nothing that matters is lost, and the binary still reports the
 commit it came from.
 
+### Old dev builds are pruned
+
+Publishing per green commit means roughly 13.6MB of release assets each. After
+each release the pipeline deletes dev prereleases beyond the newest ten, tags
+included, so the total stays bounded rather than growing a few GB a month.
+
+Only `-dev.` prereleases are touched. rc and stable releases are history and
+are kept whatever their age. Nothing is lost that anyone would install: nodes
+update forward, and the newest ten cover any rollback worth doing.
+
+Run it by hand with `scripts/prune-dev-releases.sh [keep]`. It is
+`continue-on-error` in the pipeline — a release that built, tagged and
+published correctly must not be reported failed because tidying up afterwards
+hit a network error.
+
 ---
 
 ## How a node updates

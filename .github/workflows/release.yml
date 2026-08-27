@@ -212,3 +212,14 @@ jobs:
               > /dev/null
           done
           echo "published $TAG"
+
+      # Best-effort on purpose: a release that built, tagged and published
+      # correctly must not be marked failed because tidying up afterwards hit
+      # a network error.
+      - name: Prune old dev releases
+        if: steps.version.outputs.release == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: ./scripts/prune-dev-releases.sh 10
