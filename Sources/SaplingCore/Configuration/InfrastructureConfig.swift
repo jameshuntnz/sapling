@@ -79,9 +79,14 @@ public struct CacheConfig: Codable, Sendable {
     public var port: Int
     /// Which pull-through proxies to run.
     ///
-    /// See §12 — starting with Go and Cargo follows ephemerd's precedent; npm/pip
-    /// are wired but off by default until there's a real workload asking for
-    /// them.
+    /// `maven` is here because it is the only one with a workload behind it:
+    /// the repositories a Kotlin/Android build resolves against. Go and Cargo
+    /// followed ephemerd's precedent and have cached nothing on this node,
+    /// because nothing built here uses either.
+    ///
+    /// Note that `sapling install` writes this field out, so an existing
+    /// config keeps whatever list it was installed with — adding a proxy to
+    /// this default does not reach a node that already has a config.toml.
     public var proxies: [String]
     /// Size ceiling; least-recently-used entries are pruned past it.
     public var maxSizeGB: Int
@@ -93,7 +98,8 @@ public struct CacheConfig: Codable, Sendable {
 
     /// Creates an infrastructure configuration.
     public init(
-        enabled: Bool = true, port: Int = 8735, proxies: [String] = ["go", "cargo"], maxSizeGB: Int = 20
+        enabled: Bool = true, port: Int = 8735,
+        proxies: [String] = ["maven"], maxSizeGB: Int = 20
     ) {
         self.enabled = enabled
         self.port = port
@@ -106,7 +112,7 @@ public struct CacheConfig: Codable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         port = try c.decodeIfPresent(Int.self, forKey: .port) ?? 8735
-        proxies = try c.decodeIfPresent([String].self, forKey: .proxies) ?? ["go", "cargo"]
+        proxies = try c.decodeIfPresent([String].self, forKey: .proxies) ?? ["maven"]
         maxSizeGB = try c.decodeIfPresent(Int.self, forKey: .maxSizeGB) ?? 20
     }
 }

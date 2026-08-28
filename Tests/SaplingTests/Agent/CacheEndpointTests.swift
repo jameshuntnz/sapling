@@ -59,7 +59,8 @@ struct CacheEndpointTests {
     /// fails for a reason nothing names.
     @Test("proves the proxy answers before exporting anything")
     func probesBeforeExporting() {
-        let config = CacheConfig()
+        var config = CacheConfig()
+        config.proxies = ["go"]
         let script = CacheEndpoint.exportScript(cache: config, platform: .linux)
         let probeIndex = script.range(of: CacheConfig.healthPath)
         let exportIndex = script.range(of: "export GOPROXY")
@@ -89,6 +90,25 @@ struct CacheEndpointTests {
             let result = try await ProcessRunner.run("bash", ["-n", file.path], timeout: .seconds(20))
             #expect(result.succeeded, "\(platform.rawValue): \(result.stderr)")
         }
+    }
+
+    /// The mirror address is exported and nothing more.
+    ///
+    /// Gradle has no global mirror setting, so the alternative is an init
+    /// script that clears the build's own repository list from outside the
+    /// project — which reorders resolution, breaks the content filters
+    /// `google()` is declared with, and fails the build when it is wrong.
+    @Test("Maven exports an address, and does not rewrite the build")
+    func mavenExportsAnAddressOnly() {
+        var config = CacheConfig()
+        config.proxies = ["maven"]
+        let script = CacheEndpoint.exportScript(cache: config, platform: .linux)
+        #expect(script.contains("SAPLING_MAVEN"))
+        #expect(script.contains("/maven"))
+        // Nothing that reaches into the build.
+        #expect(!script.contains("init.gradle"))
+        #expect(!script.contains("repositories"))
+        #expect(!script.contains("settingsEvaluated"))
     }
 
     @Test("exports only the proxies that are enabled")

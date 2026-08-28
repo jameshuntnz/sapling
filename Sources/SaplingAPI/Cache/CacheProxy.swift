@@ -38,6 +38,50 @@ actor CacheProxy {
             immutableMatcher: { $0.contains("/-/") }
         ),
     ]
+    .merging(mavenUpstreams) { current, _ in current }
+
+    /// The four repositories a Kotlin/Android build resolves against.
+    ///
+    /// One prefix each rather than a single merged mirror, because Gradle is
+    /// told about them separately and their order matters — `google()` is
+    /// declared first and filtered to Android and Google groups. Collapsing
+    /// them into one endpoint would lose that and change which repository an
+    /// artifact resolves from.
+    ///
+    /// Maven layout is immutable except for two things: `maven-metadata.xml`,
+    /// which is how a version range or `latest` is resolved, and anything
+    /// under a `-SNAPSHOT` version, which is republished by definition.
+    /// Everything else is a released coordinate and never changes, so it can
+    /// be served from disk forever.
+    static let mavenUpstreams: [String: Upstream] = [
+        "maven-central": Upstream(
+            prefix: "maven/central",
+            base: "https://repo1.maven.org/maven2",
+            immutableMatcher: isImmutableMavenPath
+        ),
+        "maven-google": Upstream(
+            prefix: "maven/google",
+            base: "https://dl.google.com/dl/android/maven2",
+            immutableMatcher: isImmutableMavenPath
+        ),
+        "maven-plugins": Upstream(
+            prefix: "maven/plugins",
+            base: "https://plugins.gradle.org/m2",
+            immutableMatcher: isImmutableMavenPath
+        ),
+        "maven-jitpack": Upstream(
+            prefix: "maven/jitpack",
+            base: "https://jitpack.io",
+            // JitPack builds on demand and can republish a coordinate, so
+            // nothing from it is treated as permanent.
+            immutableMatcher: { _ in false }
+        ),
+    ]
+
+    /// Whether a Maven path names a released artifact rather than a moving one.
+    static let isImmutableMavenPath: @Sendable (String) -> Bool = { path in
+        !path.contains("maven-metadata") && !path.contains("-SNAPSHOT")
+    }
 
     let config: CacheConfig
     let root: URL
@@ -82,6 +126,8 @@ actor CacheProxy {
                 out["cargo-crates"] = upstreamTable["cargo-crates"]
             case "npm":
                 out["npm"] = upstreamTable["npm"]
+            case "maven":
+                for key in Self.mavenUpstreams.keys { out[key] = upstreamTable[key] }
             default:
                 Log.warn("unknown cache proxy \"\(name)\" in config; ignoring")
             }

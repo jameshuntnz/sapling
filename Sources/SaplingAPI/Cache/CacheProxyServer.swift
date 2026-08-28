@@ -48,6 +48,19 @@ public struct CacheProxyServer: Sendable {
                 let segments = upstream.prefix.split(separator: "/").map {
                     PathComponent(stringLiteral: String($0))
                 }
+                // GET and HEAD. Gradle asks HEAD first to check an artifact
+                // exists, and a 405 there fails resolution before the GET is
+                // ever made. Both go through the same handler; NIO drops the
+                // body for a HEAD, and the fetch warms the cache for the GET
+                // that follows.
+                app.on(.HEAD, segments + [.catchall]) { request async throws -> Response in
+                    let path = request.parameters.getCatchall().joined(separator: "/")
+                    let query = request.url.query.map { "?\($0)" } ?? ""
+                    let file = try await proxy.fetch(upstream: key, path: path + query)
+                    let response = Response(status: .ok)
+                    response.headers.replaceOrAdd(name: .contentType, value: file.contentType)
+                    return response
+                }
                 app.get(segments + [.catchall]) { request async throws -> Response in
                     let path = request.parameters.getCatchall().joined(separator: "/")
                     let query = request.url.query.map { "?\($0)" } ?? ""

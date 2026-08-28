@@ -78,6 +78,21 @@ enum CacheEndpoint {
         if cache.proxies.contains("npm") {
             exports.append(#"export NPM_CONFIG_REGISTRY="${sapling_cache}/npm""#)
         }
+        if cache.proxies.contains("maven") {
+            // Only the base address, deliberately. Gradle has no global mirror
+            // setting — Maven's `settings.xml` mirrors have no equivalent — so
+            // the alternative is an init script that clears the build's own
+            // repository list and puts these in front of it. That reorders
+            // dependency resolution from outside the project, breaks the
+            // content filters `google()` is declared with, and fails the build
+            // if anything about it is wrong.
+            //
+            // Exporting the address and letting the build opt in is a worse
+            // cache and a much better trade: the repository declares which
+            // repositories it trusts, and a node that is not Sapling simply
+            // does not set this.
+            exports.append(#"export SAPLING_MAVEN="${sapling_cache}/maven""#)
+        }
         return exports
     }
 }
