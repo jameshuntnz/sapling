@@ -190,6 +190,44 @@ struct RunnerImageTests {
         #expect(!bare.linux.rosetta)
         #expect(bare.linux.arch == nil)
     }
+
+    // MARK: - Selectors, and the two audiences for them
+
+    /// Every label is either a capability or a selector, and never neither.
+    ///
+    /// The invariant that would have caught a real outage. Sapling strips
+    /// selectors to decide its own eligibility, and GitHub needs the runner to
+    /// advertise them — so a prefix taught to one side and not the other
+    /// silently disappears. `mem:` was added to the matcher but not to the
+    /// runner registration, and the job was never dispatched at all: GitHub
+    /// held it while a runner sat idle waiting for work it would never be
+    /// offered, for 28 minutes, until a person cancelled it by hand.
+    @Test("no label is lost between capabilities and selectors")
+    func nothingFallsBetween() {
+        let labels = ["self-hosted", "linux", "arm64", "image:android", "mem:6"]
+        let capabilities = Set(RunnerImageSelector.parse(labels).capabilities)
+        let selectors = Set(RunnerImageSelector.selectors(in: labels))
+
+        #expect(capabilities.union(selectors) == Set(labels))
+        #expect(capabilities.intersection(selectors).isEmpty)
+        #expect(selectors == ["image:android", "mem:6"])
+    }
+
+    /// GitHub dispatches only to a runner whose labels are a superset of the
+    /// job's, so the registration has to carry every selector verbatim.
+    @Test("a registered runner advertises every selector the job asked for")
+    func runnerAdvertisesSelectors() {
+        let nodeLabels = ["self-hosted", "linux", "arm64"]
+        let jobLabels = ["self-hosted", "linux", "arm64", "image:android", "mem:6"]
+        let registered = nodeLabels + RunnerImageSelector.selectors(in: jobLabels)
+
+        #expect(Set(jobLabels).isSubset(of: Set(registered)))
+    }
+
+    @Test("a job with no selectors registers exactly the node's labels")
+    func noSelectors() {
+        #expect(RunnerImageSelector.selectors(in: ["self-hosted", "linux"]).isEmpty)
+    }
 }
 
 /// Discards events; resolution behaviour is what these tests are about.

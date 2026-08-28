@@ -38,18 +38,19 @@ extension NodeAgent {
             // other queued job while this one is still waiting on its image.
             let image = try await resolveImage(for: job, events: events)
 
-            // The runner must advertise every label the job asked for, image
+            // The runner must advertise every label the job asked for, every
             // selector included. GitHub dispatches to a runner only when the
             // runner's labels are a superset of the job's — so a runner
             // registered with just the node's labels is never given a job that
             // asked for `image:android`, and sits at "Listening for Jobs" until
-            // the job timeout while holding a slot. Sapling strips the selector
-            // to decide *its own* eligibility; GitHub still needs to see it.
+            // the job timeout while holding a slot. Sapling strips selectors to
+            // decide *its own* eligibility; GitHub still needs to see them.
+            //
+            // Taken wholesale rather than named one at a time. Listing them
+            // individually is what broke: `mem:` was taught to the matcher and
+            // not to this, and a job carrying it was never dispatched at all.
             let nodeLabels = job.platform == .macos ? config.macos.labels : config.linux.labels
-            var labels = nodeLabels
-            if let selector = RunnerImageSelector.split(job.labels).image {
-                labels.append(RunnerImageSelector.labelPrefix + selector)
-            }
+            let labels = nodeLabels + RunnerImageSelector.selectors(in: job.labels)
             // Recorded before the runner exists, so housekeeping can never
             // sweep it during the seconds between minting and connecting.
             inFlightRunners.insert(runnerName)

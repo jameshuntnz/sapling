@@ -66,6 +66,25 @@ public enum RunnerImageSelector {
         return (capabilities, image, memoryGB)
     }
 
+    /// The selector labels in a job's list, verbatim.
+    ///
+    /// The inverse of `capabilities`, and needed because the two audiences want
+    /// opposite things. Sapling strips selectors to decide its own eligibility;
+    /// GitHub dispatches to a runner only when the runner's labels are a
+    /// superset of the job's, so the runner has to advertise every one of them.
+    ///
+    /// Derived rather than enumerated so that adding a third selector cannot
+    /// repeat the bug that produced it: `mem:` was taught to the matcher and
+    /// not to the registration, and a job carrying it was never dispatched at
+    /// all — GitHub held it while a runner sat idle waiting for work it would
+    /// never be offered.
+    ///
+    /// - Parameter labels: The `runs-on` labels from the workflow.
+    /// - Returns: Only the selectors, in the order they appeared.
+    public static func selectors(in labels: [String]) -> [String] {
+        labels.filter { $0.hasPrefix(labelPrefix) || $0.hasPrefix(memoryLabelPrefix) }
+    }
+
     /// Reads `6` or `6g` as six gigabytes.
     ///
     /// Returns `nil` for anything it does not understand, which leaves the job
