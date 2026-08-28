@@ -110,6 +110,22 @@ struct JobSizingTests {
         #expect(!JobSizing.fits(memoryGB: 2, committedGB: 12, budgetGB: 12))
     }
 
+    /// Where the size is unknown, the charge has to guess high.
+    ///
+    /// A macOS VM charged the container default would book 1GB against a guest
+    /// that takes eight, and the budget would then admit work the machine
+    /// cannot hold.
+    @Test("an unsized job is charged its own platform's default, not the other's")
+    func chargesPerPlatform() {
+        var c = SaplingConfig()
+        c.linux.memoryGB = nil
+        c.macos.memoryGB = nil
+        // Nothing configured: each platform falls back to its own tool's size.
+        #expect(LinuxConfig.containerDefaultMemoryGB == 1)
+        #expect(MacOSConfig.baseImageDefaultMemoryGB == 8)
+        #expect(MacOSConfig.baseImageDefaultMemoryGB > LinuxConfig.containerDefaultMemoryGB)
+    }
+
     @Test("the budget is the machine less the host's reserve")
     func budget() {
         var node = NodeConfig()

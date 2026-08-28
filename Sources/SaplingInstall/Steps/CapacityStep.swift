@@ -26,11 +26,17 @@ public struct CapacityStep: InstallStep {
     /// Name shown by `install` and `doctor`.
     public let name = "Capacity"
 
-    /// RAM to leave for the host: macOS, the daemon, and the container system.
+    /// Default RAM to leave for the host: macOS, the daemon, the container system.
     ///
-    /// Mirrors `node.memory_reserve_gb`, which is what the scheduler actually
-    /// subtracts; this is the default the same arithmetic assumes.
+    /// Only a default. `node.memory_reserve_gb` is what the scheduler actually
+    /// subtracts, and this step reads the same value — a doctor that reported
+    /// against a different reserve than the scheduler enforces would call a
+    /// node healthy while it over-committed, which is the failure this step
+    /// exists to catch.
     static let hostReserveGB = 4
+
+    /// What this node keeps for the host, in GB.
+    var reserveGB: Int { config.node.memoryReserveGB }
 
     /// Least memory an environment gets before this step calls it starved.
     ///
@@ -68,7 +74,8 @@ public struct CapacityStep: InstallStep {
             slots: nodeSlots,
             macPerVMGB: config.macos.effectiveMaxConcurrent > 0 ? await resolvedMacMemoryGB() : nil,
             linuxPerGB: config.linux.effectiveMaxConcurrent > 0 ? config.linux.memoryGB : nil,
-            linuxEnabled: config.linux.effectiveMaxConcurrent > 0)
+            linuxEnabled: config.linux.effectiveMaxConcurrent > 0,
+            reserveGB: reserveGB)
     }
 
     /// The macOS VM size, from config when it says, from the image when it doesn't.
@@ -87,10 +94,13 @@ public struct CapacityStep: InstallStep {
     ///   - totalGB: The machine's physical memory.
     ///   - slots: How many macOS VMs may run at once.
     ///   - perVMGB: Memory each VM is given.
+    ///   - reserveGB: RAM kept for the host.
     /// - Returns: What `doctor` should report.
-    static func assess(totalGB: Int, slots: Int, perVMGB: Int) -> StepState {
+    static func assess(
+        totalGB: Int, slots: Int, perVMGB: Int, reserveGB: Int = hostReserveGB
+    ) -> StepState {
         let wanted = slots * perVMGB
-        let available = totalGB - hostReserveGB
+        let available = totalGB - reserveGB
         let summary = "\(totalGB)GB RAM, \(slots) x \(perVMGB)GB = \(wanted)GB for VMs"
 
         if wanted >= totalGB {
@@ -103,7 +113,7 @@ public struct CapacityStep: InstallStep {
             return .fixable(
                 "\(summary), leaving \(totalGB - wanted)GB for the host — tight. "
                     + "macos.memory_gb of \(max(1, available / slots)) would leave "
-                    + "\(hostReserveGB)GB.")
+                    + "\(reserveGB)GB.")
         }
         return .ok("\(summary), \(totalGB - wanted)GB left for the host")
     }
@@ -121,12 +131,14 @@ public struct CapacityStep: InstallStep {
     ///   - macPerVMGB: Memory each macOS VM is given, or nil when unknown/disabled.
     ///   - linuxPerGB: `linux.memory_gb`, or nil when unset/disabled.
     ///   - linuxEnabled: Whether Linux jobs run at all.
+    ///   - reserveGB: RAM kept for the host.
     /// - Returns: What `doctor` should report.
     static func assessNode(
-        totalGB: Int, slots: Int, macPerVMGB: Int?, linuxPerGB: Int?, linuxEnabled: Bool
+        totalGB: Int, slots: Int, macPerVMGB: Int?, linuxPerGB: Int?, linuxEnabled: Bool,
+        reserveGB: Int = hostReserveGB
     ) -> StepState {
         guard slots > 0 else { return .ok("no job slots — this node accepts nothing") }
-        let available = totalGB - hostReserveGB
+        let available = totalGB - reserveGB
         let fits = available / slots
 
         // Reported before any arithmetic: the size an unset node is really
@@ -158,7 +170,7 @@ public struct CapacityStep: InstallStep {
         if wanted > available {
             return .fixable(
                 "\(summary), leaving \(totalGB - wanted)GB for the host — tight. "
-                    + "\(max(1, fits))GB each would leave \(hostReserveGB)GB.")
+                    + "\(max(1, fits))GB each would leave \(reserveGB)GB.")
         }
         if largest < minimumGB {
             return .fixable(
@@ -194,7 +206,7 @@ public struct CapacityStep: InstallStep {
     /// concurrency can fix a machine with nothing spare.
     public func fix() async throws -> String {
         let totalGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
-        let available = totalGB - Self.hostReserveGB
+        let available = totalGB - reserveGB
         let slots = nodeSlots
         guard slots > 0 else { return "no job slots to size" }
 
@@ -202,7 +214,7 @@ public struct CapacityStep: InstallStep {
         guard per >= Self.minimumGB else {
             throw InstallError(
                 "\(totalGB)GB RAM leaves \(available)GB for \(slots) slot(s) after "
-                    + "\(Self.hostReserveGB)GB for the host — \(per)GB each, under the "
+                    + "\(reserveGB)GB for the host — \(per)GB each, under the "
                     + "\(Self.minimumGB)GB an environment needs to finish a real build. Lower "
                     + "node.max_concurrent; writing a smaller size would only move the OOM kill "
                     + "into the next build.")
@@ -222,6 +234,6 @@ public struct CapacityStep: InstallStep {
         guard !changes.isEmpty else { return "sizes already fit" }
         try updated.save()
         return "set \(changes.joined(separator: ", ")) — \(slots) slot(s) of \(per)GB in "
-            + "\(totalGB)GB, \(Self.hostReserveGB)GB for the host (restart the daemon to apply)"
+            + "\(totalGB)GB, \(reserveGB)GB for the host (restart the daemon to apply)"
     }
 }

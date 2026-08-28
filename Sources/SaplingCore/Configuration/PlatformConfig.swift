@@ -45,6 +45,14 @@ public struct MacOSConfig: Codable, Sendable {
     /// `nil` means only the node's memory budget limits it.
     public var maxMemoryGB: Int?
 
+    /// What a prepared base image asks for, when config names no size.
+    ///
+    /// Tart honours the image's own setting, and the documented base image asks
+    /// for 8GB. Used only as the figure a VM of unknown size is *charged*
+    /// against the budget: guessing low would let the scheduler admit work
+    /// against memory the VM is about to take anyway.
+    public static let baseImageDefaultMemoryGB = 8
+
     /// `maxConcurrent` clamped to Apple's limit.
     ///
     /// Always use this, never the raw config value.

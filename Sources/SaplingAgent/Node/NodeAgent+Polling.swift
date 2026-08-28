@@ -163,10 +163,28 @@ extension NodeAgent {
             ?? JobSizing.memoryGB(labels: job.labels, platform: job.platform, config: config)
     }
 
+    /// What a job of unknown size is charged against the budget, in GB.
+    ///
+    /// Per platform, because the two are nowhere near each other: charging a
+    /// macOS VM the container default would book 1GB against a guest that takes
+    /// eight, and the budget would admit work the machine cannot hold. Where it
+    /// has to guess, it guesses high.
+    func defaultMemoryGB(for platform: JobPlatform) -> Int {
+        switch platform {
+        case .macos:
+            max(1, config.macos.memoryGB ?? MacOSConfig.baseImageDefaultMemoryGB)
+        case .linux:
+            max(1, config.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
+        }
+    }
+
     func dispatchQueuedJobs() async throws {
         var inUse = try await store.slotsInUse()
-        let defaultGB = max(1, config.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
-        var committedGB = try await store.committedMemoryGB(fallbackGB: defaultGB)
+        // Charged for jobs that predate sizing: the larger of the two defaults,
+        // since which platform an unsized survivor belonged to is exactly what
+        // is not known, and under-charging over-commits the machine.
+        var committedGB = try await store.committedMemoryGB(
+            fallbackGB: max(defaultMemoryGB(for: .macos), defaultMemoryGB(for: .linux)))
         let budgetGB = memoryBudgetGB
         let queued = try await store.jobs(status: .queued, limit: 50)
             .sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
@@ -179,7 +197,7 @@ extension NodeAgent {
             guard inUse.values.reduce(0, +) < nodeCapacity else { break }
             guard !blockedByOtherPlatform(job.platform, inUse: inUse) else { continue }
 
-            let wanted = memoryGB(for: job) ?? defaultGB
+            let wanted = memoryGB(for: job) ?? defaultMemoryGB(for: job.platform)
             guard JobSizing.fits(memoryGB: wanted, committedGB: committedGB, budgetGB: budgetGB)
             else {
                 // Head-of-line reservation. Skipping to a job that does fit

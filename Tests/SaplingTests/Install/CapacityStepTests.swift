@@ -145,6 +145,24 @@ struct CapacityStepTests {
             ).isOK)
     }
 
+    /// A doctor reporting against a different reserve than the scheduler
+    /// enforces would call a node healthy while it over-committed — which is
+    /// the failure this step exists to catch.
+    @Test("honours a configured host reserve rather than assuming the default")
+    func honoursConfiguredReserve() {
+        // 16GB, 2 slots, 6GB each fits with the default 4GB reserve...
+        #expect(
+            CapacityStep.assessNode(
+                totalGB: 16, slots: 2, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true
+            ).isOK)
+        // ...and does not once the host is promised 8GB.
+        #expect(
+            !CapacityStep.assessNode(
+                totalGB: 16, slots: 2, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true,
+                reserveGB: 8
+            ).isOK)
+    }
+
     @Test("a node with no slots accepts nothing and needs no memory")
     func noSlots() {
         #expect(
