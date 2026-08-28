@@ -15,6 +15,9 @@ import SaplingCore
 ///   idle at boot — the normal state — never started a cache at all.
 /// - It never noticed a bridge going away, which happens every time the last
 ///   environment on it exits.
+/// - It polled too slowly to be useful. A macOS VM boots in about eight
+///   seconds and asks for the cache straight away; on a twenty-second poll
+///   there was never a listener in time, so every macOS job fetched directly.
 ///
 /// So: watch the bridge table, run one listener per gateway, and start and
 /// stop them as bridges come and go. Bound to the gateways rather than
@@ -29,8 +32,13 @@ public actor CacheProxySupervisor {
     /// Creates a supervisor.
     /// - Parameters:
     ///   - config: Cache settings, including the port to listen on.
-    ///   - poll: How often to re-read the host's bridges.
-    public init(config: CacheConfig, poll: Duration = .seconds(20)) {
+    ///   - poll: How often to re-read the host's bridges. Short, because a
+    ///     macOS VM boots in about eight seconds and probes for the cache
+    ///     immediately: at twenty seconds no listener existed yet and every
+    ///     macOS job fell back to fetching directly, which made the mirror
+    ///     useless for exactly the jobs that needed it. Reading the bridge
+    ///     table is one `ifconfig`.
+    public init(config: CacheConfig, poll: Duration = .seconds(3)) {
         self.config = config
         self.poll = poll
     }
@@ -50,13 +58,10 @@ public actor CacheProxySupervisor {
             for gone in listeners.keys where !gateways.contains(gone) {
                 guard let listener = listeners.removeValue(forKey: gone) else { continue }
                 listener.cancel()
-                // Waited for, not just cancelled. Vapor's shutdown is
-                // asynchronous, so cancelling and moving on left the socket
-                // open — and when the same bridge came back, which is the
-                // normal case for a gateway address, the replacement listener
-                // failed to bind with "Address already in use". That happened
-                // three times in one afternoon.
-                await settle(listener)
+                // Vapor's shutdown is asynchronous, so the socket outlives the
+                // cancellation briefly and a same-address rebind — the normal
+                // case for a gateway — can fail with "Address already in use".
+                await settle()
                 Log.info("cache proxy stopped listening on \(gone) — its bridge went away")
             }
             for gateway in gateways where listeners[gateway] == nil {
@@ -85,19 +90,22 @@ public actor CacheProxySupervisor {
         }
     }
 
-    /// Wait for a cancelled listener to actually let go of its port.
+    /// Give a cancelled listener a moment to let go of its port.
     ///
-    /// Bounded, because a shutdown that hangs must not stall the supervisor
-    /// for every other gateway. If it overruns, the next poll finds the
-    /// gateway without a listener and tries again — which is the same
-    /// recovery a failed bind gets.
-    private func settle(_ listener: Task<Void, Never>) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await listener.value }
-            group.addTask { try? await Task.sleep(for: .seconds(10)) }
-            await group.next()
-            group.cancelAll()
-        }
+    /// Deliberately **not** an await on the listener's completion. That was
+    /// tried and it hung the supervisor permanently: `Task<Void, Never>.value`
+    /// is not cancellable, so `cancelAll()` cannot stop a child waiting on it
+    /// and the task group blocks forever at scope exit if the server does not
+    /// observe cancellation. Measured — the cache proxy stopped binding
+    /// anything at 08:25:27 and never recovered, so the mirror was dead for
+    /// every job after it.
+    ///
+    /// A fixed pause is enough for the common case, and the uncommon one is
+    /// self-healing anyway: a bind that loses the race fails, the listener
+    /// exits, and the next poll finds the gateway unserved and tries again.
+    /// Recovering a second later beats not recovering at all.
+    private func settle() async {
+        try? await Task.sleep(for: .seconds(2))
     }
 
     private func stopAll() {
