@@ -50,29 +50,7 @@ public struct TartProvider: JobProvider, Sendable {
         return result.succeeded
     }
 
-    func run(_ request: JobRunRequest, events: any EventSink) async throws -> JobOutcome {
-        let vmName = Self.vmPrefix + request.runnerName
-
-        // Teardown has to happen no matter how we leave this function — a
-        // leaked VM holds one of only two macOS slots until someone notices —
-        // and it has to be *awaited*, because the caller releases the slot as
-        // soon as this returns.
-        do {
-            let outcome = try await boot(vmName: vmName, request: request, events: events)
-            await Self.teardown(vmName: vmName, events: events)
-            await NetworkAftercare.afterVMTeardown(events: events)
-            return outcome
-        } catch {
-            await Self.teardown(vmName: vmName, events: events)
-            // Both paths, because the failing teardown is the one that did the
-            // damage: a VM that never booted properly took a running
-            // container's bridge with it when it was cleaned up.
-            await NetworkAftercare.afterVMTeardown(events: events)
-            throw error
-        }
-    }
-
-    private func boot(
+    func boot(
         vmName: String, request: JobRunRequest, events: any EventSink
     ) async throws -> JobOutcome {
         await events.record(RunEventName.vmCloned, detail: "cloning \(config.baseImage) -> \(vmName)")
@@ -116,7 +94,7 @@ public struct TartProvider: JobProvider, Sendable {
         }
         defer { bootTask.cancel() }
 
-        let ip = try await waitForIP(vmName: vmName, timeout: request.bootTimeout, process: process)
+        let ip = try await waitForIP(vmName: vmName, timeout: Self.attachTimeout, process: process)
         await events.record(RunEventName.vmBooted, detail: ip)
 
         // Asked of the host, before anything is asked of the guest: it costs

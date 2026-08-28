@@ -35,23 +35,21 @@ public struct NodeConfig: Codable, Sendable {
 
     /// Run one platform at a time, whatever the per-platform slot counts say.
     ///
-    /// On by default, because the concurrency it gives up is not concurrency
-    /// this node has. Measured three times: a macOS VM and an Apple
-    /// `container` start together, the VM's vmnet interface is created and
-    /// never attached to a bridge, the VM times out after five minutes, and
-    /// its teardown then destroys the bridge the container is using — killing
-    /// the Linux job. Sapling requeues the macOS job, which now runs alone and
-    /// boots in eight seconds.
+    /// **Off**, and it should stay off. Measured on a freshly rebooted node,
+    /// three times: a container and a macOS VM started in the same instant
+    /// both attach within three seconds — `bridge100` to the container,
+    /// `bridge101` to the VM — and the VM has an address in nine. Concurrency
+    /// works. A full PR check runs both platforms through it cleanly.
     ///
-    /// That is the "fails once, then works on the retry with no intervention"
-    /// pattern, and the retry works *because* the first attempt's failure
-    /// killed the other job. So the node already serialises; it just does it
-    /// by destroying one job and spending five minutes on it. Doing it
-    /// deliberately keeps both jobs and loses nothing real.
+    /// Turning this on was a wrong turn worth recording. Every observed
+    /// failure had a container and a VM running together, so simultaneity
+    /// looked like the cause; it is not. The failures all happened on a node
+    /// that had been up for hours, and the variable is uptime, not
+    /// concurrency. Serialising traded away half the node's throughput to
+    /// avoid a fault it does not prevent.
     ///
-    /// Turn it off to test whether concurrency has started working — on a node
-    /// with no leaked `tart run` processes, which is the state that appears to
-    /// break vmnet attachment. See docs/NETWORKING.md.
+    /// Kept as a lever for an operator with a node misbehaving in a way
+    /// nobody has diagnosed yet — not as a default, and not as a fix.
     public var serializePlatforms: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -62,7 +60,7 @@ public struct NodeConfig: Codable, Sendable {
     /// Creates a server configuration.
     public init(
         name: String = Host.current().localizedName ?? "sapling-node",
-        serializePlatforms: Bool = true
+        serializePlatforms: Bool = false
     ) {
         self.name = name
         self.serializePlatforms = serializePlatforms
@@ -75,7 +73,7 @@ public struct NodeConfig: Codable, Sendable {
             try c.decodeIfPresent(String.self, forKey: .name)
             ?? Host.current().localizedName
             ?? "sapling-node"
-        serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? true
+        serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? false
     }
 }
 

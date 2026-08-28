@@ -19,11 +19,12 @@ extension TartProvider {
         case .live(let gateway):
             await events.log("bridge ok — gateway \(gateway)")
         case .orphaned:
-            throw ProviderError(
-                """
-                VM \(ip) is on a subnet no host interface owns, so it has no network at all. \
-                Nothing will reach it and it will reach nothing.
-                """)
+            throw VMAttachFailed(
+                vmName: ip,
+                detail: """
+                    it holds an address on a subnet no host interface owns, so nothing will \
+                    reach it and it will reach nothing
+                    """)
         case .unknown(let reason):
             // Not fatal: the in-guest probe still has to pass, and failing a
             // job because `ifconfig` didn't run would be its own outage.
@@ -69,7 +70,7 @@ extension TartProvider {
             // never going to report an address, and waiting out five minutes
             // to say so throws away the one message that named the cause.
             if let explanation = await process.explanation(vmName: vmName) {
-                throw ProviderError(explanation)
+                throw VMAttachFailed(vmName: vmName, detail: explanation)
             }
             let command = try await Self.tart(["ip", vmName])
             let result = try await ProcessRunner.run(command.executable, command.arguments)
@@ -87,7 +88,9 @@ extension TartProvider {
             bridges.isEmpty
             ? "no bridge interface came up for it, so there was no network to get an address from"
             : "the host has \(bridges.map(\.name).joined(separator: ", ")), so the VM itself did not ask"
-        throw ProviderError("VM \(vmName) never reported an IP address within \(timeout) — \(context)")
+        throw VMAttachFailed(
+            vmName: vmName,
+            detail: "no address within \(timeout) — \(context)")
     }
 
     func waitForSSH(ip: String, timeout: Duration) async throws {
@@ -122,4 +125,22 @@ extension TartProvider {
         ]
     }
 
+}
+
+/// A VM that never got a network, which is worth another attempt rather than
+/// a failed job.
+///
+/// Distinct from a `ProviderError` so the retry can tell "this VM did not come
+/// up" apart from "this job failed". Measured in production: the attempt after
+/// one of these boots in eight seconds and runs the job to completion.
+struct VMAttachFailed: Error, LocalizedError, Sendable {
+    /// The VM that did not come up.
+    let vmName: String
+    /// What was observed, phrased for a job's log.
+    let detail: String
+
+    /// The reason, for `LocalizedError`.
+    var errorDescription: String? {
+        "VM \(vmName) did not get a network: \(detail)."
+    }
 }

@@ -24,10 +24,16 @@ struct SerializationTests {
         return NodeAgent(config: config, store: try SaplingStore(inMemoryNamed: UUID().uuidString))
     }
 
-    @Test("serialising is the default")
-    func defaultsOn() {
-        #expect(NodeConfig().serializePlatforms)
-        #expect(SaplingConfig().node.serializePlatforms)
+    /// Off, and it should stay off.
+    ///
+    /// Measured on a rebooted node, a container and a VM started in the same
+    /// instant both attach within three seconds, three times out of three.
+    /// Serialising traded half the node's throughput for a fault it does not
+    /// prevent.
+    @Test("both platforms run together by default")
+    func defaultsOff() {
+        #expect(!NodeConfig().serializePlatforms)
+        #expect(!SaplingConfig().node.serializePlatforms)
     }
 
     @Test("a busy platform holds the other one back")
@@ -55,9 +61,9 @@ struct SerializationTests {
     }
 
     /// `sapling install` writes every field to config.toml, so the flag has to
-    /// survive a save and a load — and an older file that predates it has to
-    /// come back as the safe default rather than as `false`.
-    @Test("the setting survives a save, and an older config defaults to on")
+    /// survive a save and a load, and a file written before it existed has to
+    /// load as the default rather than as anything surprising.
+    @Test("the setting survives a save, and an older config defaults to off")
     func roundTrips() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -78,6 +84,6 @@ struct SerializationTests {
             .filter { !$0.contains("serialize_platforms") }
             .joined(separator: "\n")
         try older.write(to: file, atomically: true, encoding: .utf8)
-        #expect(try SaplingConfig.load(from: file).node.serializePlatforms)
+        #expect(try !SaplingConfig.load(from: file).node.serializePlatforms)
     }
 }

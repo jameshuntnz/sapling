@@ -89,7 +89,70 @@ the failed `tart run` in seconds rather than minutes, so the broken state is
 never sat on; checks after every VM teardown whether anything else lost its
 network; and repairs the container network when it has.
 
-### Why one platform at a time
+### The root cause is not known
+
+Say it plainly, because several plausible stories have been wrong already.
+
+**Established:** a VM's `vmenet` interface is sometimes created and never
+attached to a bridge, while a container's attaches normally seconds later. The
+VM process is alive and healthy throughout; it simply has no network to ask for
+an address on. Tearing that VM down then destroys another guest's bridge.
+
+**Not established:** why the attach fails. Something about a node that has been
+up for hours, and nothing about concurrency.
+
+Two theories were tested and discarded:
+
+- *"They fight over one bridge."* No. They get one each — `bridge100` for the
+  container, `bridge101` for the VM — and coexist in either start order.
+- *"Starting them at the same instant races."* No. On a freshly rebooted node,
+  a container and a VM started in the same instant both attached within three
+  seconds and the VM had an address in nine — three times out of three.
+
+What separates the failures from the successes is **uptime**, not what else is
+running. Every failure happened on a node up for hours; a rebooted node runs
+the same workload cleanly.
+
+The best remaining candidate is leaked `sudo tart run` wrappers, one per macOS
+job — but a node was observed with one leaked wrapper and zero leaked `vmenet`
+interfaces, which breaks the obvious version of that story. It is a candidate,
+not an answer.
+
+Since it cannot be reproduced on demand, `NetworkDiagnostics` captures the
+host's full networking state the moment an attach fails, before teardown
+destroys the evidence. It is built to settle two specific hypotheses:
+`InternetSharing` wedging (it logs `waiting for
+mis_vmnet_interface_attached_callback` and, in the observed failure, never got
+it — if so, `launchctl kickstart -k system/com.apple.InternetSharing` is a
+seconds-long repair instead of a reboot), and `bootpd` lease exhaustion on a
+`/24` after a day of jobs.
+
+### Why the retry matters more than the cause
+
+Because the cause is unknown, the design does not try to prevent the fault. It
+makes it cheap:
+
+- A VM gets 90 seconds to report an address, against a measured healthy nine.
+- Failing that, the state is captured, the VM is destroyed, and a **fresh one
+  is built** — up to three times.
+- Only then does the job fail.
+
+This is worth more than any of the theories, because it works whatever the
+cause turns out to be. It also removes the collateral damage: the destructive
+teardown only happened because a dead VM was allowed to sit for five minutes,
+and now it never does.
+
+### Why platforms are not serialised
+
+`node.serialize_platforms` exists and defaults to **off**. It was briefly
+defaulted on, and that was wrong: it gives up half the node's throughput to
+avoid a fault it does not prevent. The measurements above — three simultaneous
+starts, three clean attaches, and a full PR check running both platforms
+through a rebooted node — are why.
+
+### The wayfairer/sapling difference
+
+
 
 The failure needs a container and a VM running together, and that is exactly
 what a wayfairer PR check does — android in a container, ios in a VM, in
@@ -305,7 +368,8 @@ watching.
   and a reproduction outside a real job has not been found.
 - Disk I/O contention between a 140GB VM clone and a container build on one
   SSD, which produces boot timeouts that look like network faults.
-- Whether a clean node — no leaked processes, no leaked `vmenet` interfaces —
-  can actually run a VM and a container at once. If it can,
-  `node.serialize_platforms` can go back off. Until someone has measured that
-  on a rebooted node, concurrency is the thing to prove rather than assume.
+- **The root cause.** Why a VM's interface fails to attach on a node that has
+  been up for hours. `NetworkDiagnostics` exists to answer this the next time
+  it happens; until then the retry makes it survivable rather than fatal.
+- Whether the leaked `tart run` wrappers are that cause, or merely another
+  symptom of the same thing.
