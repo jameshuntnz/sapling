@@ -26,21 +26,24 @@ struct ImmediateProvider: JobProvider, Sendable {
 struct HandOffTests {
 
     func withAgent<T>(
+        fixtures suppliedFixtures: FakeGitHubFixtures? = nil,
         remoteJob: String,
         cancelRunWhenExhausted: Bool = false,
         _ body: (NodeAgent, SaplingStore, FakeGitHubServer) async throws -> T
     ) async throws -> T {
-        var fixtures = FakeGitHubFixtures()
-        fixtures.queuedRunIDs = [100]
-        fixtures.jobsByRun = [
-            100: """
-            {"jobs":[
-              {"id":9001,"run_id":100,"name":"build","status":"queued","conclusion":null,
-               "labels":["self-hosted","macos"],"started_at":null,
-               "completed_at":null,"runner_name":null}
-            ]}
-            """
-        ]
+        var fixtures = suppliedFixtures ?? FakeGitHubFixtures()
+        if suppliedFixtures == nil {
+            fixtures.queuedRunIDs = [100]
+            fixtures.jobsByRun = [
+                100: """
+                {"jobs":[
+                  {"id":9001,"run_id":100,"name":"build","status":"queued","conclusion":null,
+                   "labels":["self-hosted","macos"],"started_at":null,
+                   "completed_at":null,"runner_name":null}
+                ]}
+                """
+            ]
+        }
         fixtures.jobByID = [9001: remoteJob]
         let server = try await FakeGitHubServer.start(fixtures: fixtures)
 
@@ -141,7 +144,69 @@ struct HandOffTests {
             await agent.handleExhaustedJob(job)
             #expect(server.state.cancelledRuns == [100])
             let details = try await store.events(jobID: "9001").compactMap(\.detail)
-            #expect(details.contains { $0.contains("along with its other jobs") })
+            #expect(details.contains { $0.contains("nothing else in it was running") })
+        }
+    }
+
+    /// A sibling mid-build must not be killed to tidy up after this job.
+    ///
+    /// Cancelling is a whole-run operation, so the run is left alone and
+    /// reconsidered later, once that sibling has finished.
+    @Test("a run with a sibling still working is left alone")
+    func siblingStillRunningBlocksTheCancel() async throws {
+        var fixtures = FakeGitHubFixtures()
+        fixtures.queuedRunIDs = [100]
+        // 9001 is the job being given up on; 9002 is mid-build beside it.
+        fixtures.jobsByRun = [
+            100: """
+            {"jobs":[
+              {"id":9001,"run_id":100,"name":"build","status":"queued","conclusion":null,
+               "labels":["self-hosted","macos"],"started_at":null,"completed_at":null,
+               "runner_name":null},
+              {"id":9002,"run_id":100,"name":"android","status":"in_progress","conclusion":null,
+               "labels":["self-hosted","linux"],"started_at":"2026-08-24T10:00:00Z",
+               "completed_at":null,"runner_name":"sap-linux-live"}
+            ]}
+            """
+        ]
+        try await withAgent(
+            fixtures: fixtures,
+            remoteJob: fakeRemoteJob(id: 9001, status: "queued", conclusion: nil),
+            cancelRunWhenExhausted: true
+        ) { agent, store, server in
+            let job = Job(
+                id: "9001", repo: "acme/widgets", workflowRunID: "100", platform: .macos,
+                labels: [], status: .failed)
+            try await store.saveJob(job)
+
+            await agent.handleExhaustedJob(job)
+            #expect(server.state.cancelledRuns.isEmpty, "a running sibling must not be killed")
+            let details = try await store.events(jobID: "9001").compactMap(\.detail)
+            #expect(details.contains { $0.contains("android") && $0.contains("still running") })
+        }
+    }
+
+    /// Not knowing is not permission.
+    ///
+    /// If GitHub cannot be asked what else is in the run, cancelling it might
+    /// kill live work.
+    @Test("an unreachable GitHub leaves the run alone")
+    func unknownSiblingsBlockTheCancel() async throws {
+        var fixtures = FakeGitHubFixtures()
+        fixtures.queuedRunIDs = [100]
+        fixtures.failingRepos = ["acme/widgets"]
+        try await withAgent(
+            fixtures: fixtures,
+            remoteJob: fakeRemoteJob(id: 9001, status: "queued", conclusion: nil),
+            cancelRunWhenExhausted: true
+        ) { agent, store, server in
+            let job = Job(
+                id: "9001", repo: "acme/widgets", workflowRunID: "100", platform: .macos,
+                labels: [], status: .failed)
+            try await store.saveJob(job)
+
+            await agent.handleExhaustedJob(job)
+            #expect(server.state.cancelledRuns.isEmpty)
         }
     }
 }

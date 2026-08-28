@@ -124,6 +124,19 @@ actor GitHubClient {
         return jobs
     }
 
+    /// Every job in one workflow run.
+    ///
+    /// Needed before cancelling a run: GitHub has no per-job cancel — the only
+    /// endpoint is "cancel this run", which takes every sibling with it. So
+    /// the siblings have to be looked at first.
+    func jobs(repo: String, runID: Int64) async throws -> [WorkflowJob] {
+        try await request(
+            "GET",
+            "/repos/\(repo)/actions/runs/\(runID)/jobs?per_page=100",
+            as: WorkflowJobsResponse.self
+        ).jobs
+    }
+
     /// Current state of one job, used to reconcile what actually happened
     /// after a runner exits.
     func job(repo: String, jobID: Int64) async throws -> WorkflowJob {

@@ -87,6 +87,15 @@ struct FakeGitHubServer {
         }
 
         app.get("repos", ":owner", ":repo", "actions", "runs", ":runID", "jobs") { request -> Response in
+            // A failing repo fails this endpoint too. Without that, code which
+            // is supposed to hold back when GitHub cannot be asked was tested
+            // against a GitHub that answered "no jobs" — the opposite of not
+            // knowing, and the two lead to opposite decisions.
+            let repo =
+                "\(request.parameters.get("owner") ?? "")/\(request.parameters.get("repo") ?? "")"
+            guard !fixtures.failingRepos.contains(repo) else {
+                return Self.json(#"{"message":"Server Error"}"#, status: .internalServerError)
+            }
             let runID = Int64(request.parameters.get("runID") ?? "0") ?? 0
             state.recordJobsRequest(runID)
             return Self.json(fixtures.jobsByRun[runID] ?? #"{"jobs":[]}"#)

@@ -16,6 +16,9 @@ struct WorkflowJob: Decodable, Sendable {
 
     var isQueued: Bool { status == "queued" }
     var isCompleted: Bool { status == "completed" }
+    /// Assigned to a runner and working, which is the state that makes
+    /// cancelling its run destructive.
+    var isInProgress: Bool { !isQueued && !isCompleted }
 }
 
 struct WorkflowJobsResponse: Decodable {

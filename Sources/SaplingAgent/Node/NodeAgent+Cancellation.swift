@@ -94,24 +94,66 @@ extension NodeAgent {
 
     /// This node has stopped trying, so tell GitHub if we're allowed to.
     ///
-    /// GitHub has no per-job cancel: the only endpoint is "cancel this run",
-    /// which takes the job's siblings with it — including ones running happily
-    /// on the other platform. That is too destructive to do on our own
-    /// judgement, so it happens only when the config asks for it. Left off, the
-    /// job simply waits out GitHub's own timeout, which costs nothing here.
+    /// GitHub has no per-job cancel — confirmed against its REST API, where
+    /// every workflow-job endpoint is a read. The only lever is "cancel this
+    /// run", which takes the job's siblings with it, so it still happens only
+    /// when the config asks for it.
+    ///
+    /// What it no longer does is act blind. The run is cancelled only when
+    /// nothing else in it is working, and left alone when GitHub cannot be
+    /// asked — not knowing is not permission to kill someone's build. Left
+    /// off entirely, the job waits out GitHub's own timeout, measured at nine
+    /// hours, which is why giving up is now said plainly rather than logged
+    /// in passing.
     func handleExhaustedJob(_ job: Job) async {
-        await recordEvent(job.id, RunEventName.jobFailed, "no attempts left on this node")
+        // Said plainly, because the consequence is invisible otherwise: this
+        // node is done with the job and GitHub has no idea. It will keep the
+        // job queued, waiting for a runner that is never coming, until its own
+        // timeout — one run sat like that for nine hours.
+        let stranded =
+            "no attempts left on this node; GitHub is still waiting for a runner and will "
+            + "keep this job queued until its own timeout"
+        await recordEvent(job.id, RunEventName.jobFailed, stranded)
+        Log.error("\(job.repo) #\(job.id): \(stranded)")
+
         guard config.github.cancelRunWhenExhausted else { return }
         guard let runID = job.workflowRunID.flatMap(Int64.init) else { return }
+
+        // Cancelling is a whole-run operation — GitHub has no per-job cancel —
+        // so it is only safe while nothing else in the run is working. A
+        // sibling mid-build on the other platform must not be killed to tidy
+        // up after this one; the run gets left alone and reconsidered on a
+        // later pass, once that sibling has finished.
+        if let busy = await siblingInProgress(repo: job.repo, runID: runID, excluding: job.id) {
+            let reason =
+                "leaving \(job.repo) run \(runID) alone: \"\(busy)\" is still running in it, "
+                + "and GitHub can only cancel the whole run"
+            await recordEvent(job.id, RunEventName.jobFailed, reason)
+            Log.warn(reason)
+            return
+        }
+
         do {
             try await github.cancelRun(repo: job.repo, runID: runID)
             Log.warn("cancelled \(job.repo) run \(runID) — no attempts left for job \(job.id)")
             await recordEvent(
                 job.id, RunEventName.jobCancelled,
-                "cancelled workflow run \(runID) on GitHub, along with its other jobs")
+                "cancelled workflow run \(runID) on GitHub; nothing else in it was running")
         } catch {
             Log.error("could not cancel run \(runID): \(error.localizedDescription)")
         }
+    }
+
+    /// The name of a sibling job that is currently working, if there is one.
+    ///
+    /// Errs towards leaving the run alone: if GitHub cannot be asked, we
+    /// cannot know that cancelling is safe, and killing someone's build to
+    /// tidy up is worse than leaving a job queued.
+    private func siblingInProgress(repo: String, runID: Int64, excluding jobID: String) async -> String? {
+        guard let siblings = try? await github.jobs(repo: repo, runID: runID) else {
+            return "another job (GitHub could not be asked)"
+        }
+        return siblings.first { String($0.id) != jobID && $0.isInProgress }?.name
     }
 
     /// Append an event, which must never be able to fail anything.

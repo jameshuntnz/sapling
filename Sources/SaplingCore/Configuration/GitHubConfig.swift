@@ -32,14 +32,19 @@ public struct GitHubConfig: Codable, Sendable {
     ///
     /// Overridable for GitHub Enterprise, and for tests.
     public var apiBaseURL: String
-    /// Cancel the whole workflow run when this node gives up on one of its
-    /// jobs.
+    /// Cancel the workflow run when this node gives up on one of its jobs.
     ///
-    /// Off by default, and the default is the safe one. GitHub has no
-    /// per-job cancel — the only lever is cancelling the entire run — so
-    /// turning this on to stop one stuck job also kills its siblings,
-    /// including ones that were running perfectly well on another platform.
-    /// Left off, an abandoned job simply waits out GitHub's own timeout.
+    /// Off by default, because it is still a whole-run operation: GitHub has
+    /// no per-job cancel, confirmed against its REST API — the only endpoints
+    /// for workflow jobs are reads. Left off, an abandoned job waits out
+    /// GitHub's own timeout, which has been measured at nine hours.
+    ///
+    /// It is no longer indiscriminate, though. When it is on, the run is only
+    /// cancelled if nothing else in it is working: a sibling mid-build on the
+    /// other platform is not killed to tidy up after this job, and if GitHub
+    /// cannot be asked, the run is left alone. So the trade this makes is now
+    /// "a run that has nothing left to lose ends promptly" rather than "one
+    /// stuck job takes its siblings with it".
     public var cancelRunWhenExhausted: Bool
 
     enum CodingKeys: String, CodingKey {
