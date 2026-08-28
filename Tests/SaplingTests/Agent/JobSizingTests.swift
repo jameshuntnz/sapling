@@ -142,6 +142,27 @@ struct JobSizingTests {
         #expect(JobSizing.unschedulableReason(memoryGB: 12, budgetGB: 12, ceilingGB: nil) == nil)
     }
 
+    /// The failure that cost a debugging cycle and a million page-outs.
+    ///
+    /// Two macOS VMs from a base image asking 8GB each want the whole of a 16GB
+    /// Mac mini. It used to surface as `ssh: Operation timed out` — the host
+    /// paging so hard the VM missed its boot timeout — which points at the base
+    /// image's SSH setup and not at arithmetic. Admission is what prevents it
+    /// now: the first VM fits the 12GB budget, and the second is never started.
+    @Test("the second 8GB VM on a 16GB machine is never admitted")
+    func twoLargeVMsOnASmallMachine() {
+        var node = NodeConfig()
+        node.memoryReserveGB = 4
+        let budget = node.memoryBudgetGB(totalGB: 16)
+        #expect(budget == 12)
+
+        #expect(JobSizing.fits(memoryGB: 8, committedGB: 0, budgetGB: budget))
+        #expect(!JobSizing.fits(memoryGB: 8, committedGB: 8, budgetGB: budget))
+        // And it is a job worth waiting for, not one to refuse outright: it
+        // runs perfectly well once the first VM finishes.
+        #expect(JobSizing.unschedulableReason(memoryGB: 8, budgetGB: budget, ceilingGB: nil) == nil)
+    }
+
     @Test("the budget is the machine less the host's reserve")
     func budget() {
         var node = NodeConfig()
