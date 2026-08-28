@@ -147,6 +147,10 @@ struct ContainerProvider: JobProvider, Sendable {
         // signal and not the reason it was sent.
         let observed = ObservedAddress()
 
+        // Watched as the output streams past, because the container is `--rm`
+        // and gone by the time anyone could ask the guest what happened.
+        let killWatch = MemoryKillWatch()
+
         let exitCode = try await withThrowingTaskGroup(of: Int32?.self) { group in
             group.addTask {
                 var status: Int32 = -1
@@ -155,6 +159,7 @@ struct ContainerProvider: JobProvider, Sendable {
                 ) {
                     switch chunk {
                     case .stdout(let text), .stderr(let text):
+                        await killWatch.observe(text)
                         await events.log(text)
                     case .exit(let code):
                         status = code
@@ -202,10 +207,11 @@ struct ContainerProvider: JobProvider, Sendable {
             throw JobNetworkLost(reason: EgressCheck.failureReason)
         }
 
-        return JobOutcome(
-            exitCode: exitCode,
-            message: exitCode == 0 ? nil : "container exited with status \(exitCode)"
-        )
+        guard exitCode != 0 else { return JobOutcome(exitCode: exitCode) }
+        if await killWatch.sawKill {
+            return JobOutcome(exitCode: exitCode, message: MemoryKill.reason(memoryGB: config.memoryGB))
+        }
+        return JobOutcome(exitCode: exitCode, message: "container exited with status \(exitCode)")
     }
 
     /// Arguments for `container run`, in the order the CLI expects them.

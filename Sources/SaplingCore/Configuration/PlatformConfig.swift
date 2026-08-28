@@ -144,6 +144,17 @@ public struct LinuxConfig: Codable, Sendable {
     /// must have Rosetta installed.
     public var rosetta: Bool
 
+    /// What `container` gives a container when `--memory` is absent.
+    ///
+    /// Apple's default, reported by `container system property list`. Leaving
+    /// `memoryGB` nil does not mean "let the tool size it sensibly" — it means
+    /// this, and 1GB is under half what a real CI build needs. It is enough to
+    /// boot a runner, check out a repository and compile, which is what makes
+    /// it dangerous: the job dies late, in whatever step allocates most, and
+    /// the guest's OOM killer leaves no message in the job log. See
+    /// `MemoryKill` for what the survivors report instead.
+    public static let containerDefaultMemoryGB = 1
+
     /// Concurrency the scheduler actually uses, after clamping.
     public var effectiveMaxConcurrent: Int {
         enabled ? max(0, maxConcurrent) : 0
