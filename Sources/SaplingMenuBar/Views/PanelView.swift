@@ -36,7 +36,14 @@ struct PanelView: View {
 
                     if let status = model.status {
                         VStack(alignment: .leading, spacing: 8) {
-                            SectionHeader(title: "Slots")
+                            SectionHeader(title: "Capacity")
+                            // Memory first: it is what admission actually
+                            // gates on, and a node can be idle by slot count
+                            // while being unable to start anything at all.
+                            BudgetView(
+                                budgetGB: status.memoryBudgetGB,
+                                committedGB: status.committedMemoryGB,
+                                holdings: model.memoryHoldings)
                             SlotsView(slots: status.slots)
                         }
 
@@ -60,7 +67,7 @@ struct PanelView: View {
                     jobSection(title: "Running", jobs: model.runningJobs, emptyText: "Nothing running.")
 
                     if !model.queuedJobs.isEmpty {
-                        jobSection(title: "Queued", jobs: model.queuedJobs, emptyText: "")
+                        queuedSection(reasons: model.queueReasons)
                     }
 
                     jobSection(
@@ -130,6 +137,30 @@ struct PanelView: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .help("Node is running \(version).")
+        }
+    }
+
+    /// The queue, with each job's reason for waiting beneath it.
+    ///
+    /// A queued job with no explanation invites the wrong conclusion. The
+    /// awkward case is a small job held behind a larger one — deliberate, so
+    /// the large one is not starved, and indistinguishable from a stuck
+    /// scheduler unless it says which job it is waiting on.
+    private func queuedSection(reasons: [String: QueueReason]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionHeader(title: "Queued", trailing: "\(model.queuedJobs.count)")
+            ForEach(model.queuedJobs) { job in
+                VStack(alignment: .leading, spacing: 1) {
+                    JobRow(job: job, isSelected: job.id == model.selectedJobID)
+                        .onTapGesture { model.select(jobID: job.id) }
+                    if let reason = reasons[job.id] {
+                        Text(reason.summary)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 26)
+                    }
+                }
+            }
         }
     }
 

@@ -54,6 +54,15 @@ struct ControlPlane: Sendable {
             macOS: config.macos.effectiveMaxConcurrent,
             linux: config.linux.effectiveMaxConcurrent)
 
+        // Charged the larger default for a job recorded before sizes existed:
+        // which platform an unsized survivor belonged to is exactly what is not
+        // known, and under-reporting free memory is the safer way to be wrong.
+        let totalGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
+        let fallbackGB = max(
+            config.macos.memoryGB ?? MacOSConfig.baseImageDefaultMemoryGB,
+            config.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
+        let committedGB = (try? await store.committedMemoryGB(fallbackGB: fallbackGB)) ?? 0
+
         let dayAgo = Date().addingTimeInterval(-86400)
         let lastPollRaw = try await store.state(SaplingStore.StateKey.lastPollAt)
         // Configured repos win; otherwise report what discovery actually
@@ -71,6 +80,8 @@ struct ControlPlane: Sendable {
             node: node,
             slots: slots,
             nodeCapacity: nodeCapacity,
+            memoryBudgetGB: config.node.memoryBudgetGB(totalGB: totalGB),
+            committedMemoryGB: committedGB,
             queuedJobs: try await store.countJobs(status: .queued),
             runningJobs: (inUse[.macos] ?? 0) + (inUse[.linux] ?? 0),
             completedLast24h: try await store.countJobs(status: .completed, since: dayAgo),

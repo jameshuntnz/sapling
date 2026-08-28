@@ -146,6 +146,41 @@ final class AppModel {
         jobs.filter { $0.status.isTerminal }
     }
 
+    /// Memory each running job reserved, largest first.
+    ///
+    /// Ordered by size rather than by start time: the bar is read to find what
+    /// is holding the node, and the largest holder is the answer more often
+    /// than the oldest one.
+    var memoryHoldings: [(name: String, gb: Int)] {
+        runningJobs
+            .map { (name: $0.name ?? "job \($0.id)", gb: $0.memoryGB ?? 0) }
+            .filter { $0.gb > 0 }
+            .sorted { $0.gb > $1.gb }
+    }
+
+    /// Why each queued job has not started, keyed by job id.
+    ///
+    /// Derived here rather than asked of the daemon: everything it needs is
+    /// already in the status payload, and a round trip for an explanation would
+    /// be a round trip that can disagree with the numbers beside it.
+    var queueReasons: [String: QueueReason] {
+        guard let status else { return [:] }
+        var capacity: [JobPlatform: Int] = [:]
+        var inUse: [JobPlatform: Int] = [:]
+        for slot in status.slots {
+            capacity[slot.platform] = slot.capacity
+            inUse[slot.platform] = slot.inUse
+        }
+        return QueueExplainer.explain(
+            queued: queuedJobs,
+            inUse: inUse,
+            capacity: capacity,
+            nodeCapacity: status.nodeCapacity,
+            committedGB: status.committedMemoryGB,
+            budgetGB: status.memoryBudgetGB,
+            sizeOf: { $0.memoryGB ?? 0 })
+    }
+
     var queuedJobs: [Job] {
         jobs.filter { $0.status == .queued }
     }

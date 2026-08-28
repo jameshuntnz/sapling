@@ -44,6 +44,18 @@ public struct StatusResponse: Codable, Sendable {
     /// than the machine allows: with two macOS slots, two Linux slots and a
     /// node cap of two, any mix runs but never more than two at a time.
     public var nodeCapacity: Int
+    /// Memory jobs may collectively hold on this node, in GB.
+    ///
+    /// The limit that actually decides what starts. Slot counts bound what
+    /// memory cannot see — disk, CPU, the container system's own ceilings — so
+    /// a node can be half-idle by slot and completely full by memory, which is
+    /// the state a reader most needs told.
+    public var memoryBudgetGB: Int
+    /// Memory reserved by jobs currently holding a slot, in GB.
+    public var committedMemoryGB: Int
+
+    /// Memory not yet promised to a job, in GB.
+    public var freeMemoryGB: Int { max(0, memoryBudgetGB - committedMemoryGB) }
     /// Jobs discovered but not yet started.
     public var queuedJobs: Int
     /// Jobs currently holding a slot.
@@ -72,6 +84,8 @@ public struct StatusResponse: Codable, Sendable {
         node: Node,
         slots: [SlotUsage],
         nodeCapacity: Int = 0,
+        memoryBudgetGB: Int = 0,
+        committedMemoryGB: Int = 0,
         queuedJobs: Int,
         runningJobs: Int,
         completedLast24h: Int,
@@ -86,6 +100,8 @@ public struct StatusResponse: Codable, Sendable {
         self.node = node
         self.slots = slots
         self.nodeCapacity = nodeCapacity
+        self.memoryBudgetGB = memoryBudgetGB
+        self.committedMemoryGB = committedMemoryGB
         self.queuedJobs = queuedJobs
         self.runningJobs = runningJobs
         self.completedLast24h = completedLast24h
