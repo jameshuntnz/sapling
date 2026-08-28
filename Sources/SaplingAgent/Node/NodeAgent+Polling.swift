@@ -75,7 +75,7 @@ extension NodeAgent {
                 budgetGB: memoryBudgetGB,
                 ceilingGB: platform == .macos ? config.macos.maxMemoryGB : config.linux.maxMemoryGB)
             {
-                Log.error("refusing \(repo) #\(job.id): \(reason)")
+                await refuse(job: job, repo: repo, platform: platform, reason: reason)
                 continue
             }
 
@@ -115,6 +115,41 @@ extension NodeAgent {
         return seen
     }
 
+    /// Records a job this node can never run, and tells GitHub if it safely can.
+    ///
+    /// Written to the store as failed rather than only logged: a refusal a
+    /// person has to find in the daemon log is a job that, from every angle
+    /// they actually look at, simply never ran.
+    ///
+    /// GitHub cannot be told directly. Every workflow-job endpoint in its REST
+    /// API is a read, so the only lever is cancelling the whole run — which
+    /// `handleExhaustedJob` already does, and only when no sibling is working
+    /// in that run. Reused rather than reinvented, because the sibling check is
+    /// the part that makes it safe.
+    ///
+    /// Acted on once, on first sighting. GitHub keeps reporting the job queued
+    /// until its own timeout, and re-cancelling a run every poll would be noise
+    /// at best.
+    func refuse(job: WorkflowJob, repo: String, platform: JobPlatform, reason: String) async {
+        Log.error("refusing \(repo) #\(job.id): \(reason)")
+        let record = Job(
+            id: String(job.id),
+            nodeID: nodeID,
+            repo: repo,
+            workflowRunID: String(job.runId),
+            platform: platform,
+            labels: job.labels,
+            status: .failed,
+            name: job.name,
+            queuedAt: Date(),
+            completedAt: Date(),
+            exitReason: reason
+        )
+        guard (try? await store.insertJobIfNew(record)) == true else { return }
+        await recordEvent(record.id, RunEventName.jobFailed, reason)
+        await handleExhaustedJob(record)
+    }
+
     /// Which platform, if any, can run a job with these labels.
     ///
     /// Matches GitHub's own rule: a runner is eligible when its label set is
@@ -131,98 +166,6 @@ extension NodeAgent {
             return .linux
         }
         return nil
-    }
-
-    func capacity(for platform: JobPlatform) -> Int {
-        switch platform {
-        case .macos: config.macos.effectiveMaxConcurrent
-        case .linux: config.linux.effectiveMaxConcurrent
-        }
-    }
-
-    /// Jobs this node will run at once across both platforms.
-    ///
-    /// The per-platform counts say what each platform may run; this says what
-    /// the machine may run in total. See `NodeConfig.maxConcurrent` for why
-    /// both are needed — RAM is shared and the per-platform counts cannot say so.
-    var nodeCapacity: Int {
-        config.node.effectiveMaxConcurrent(
-            macOS: config.macos.effectiveMaxConcurrent,
-            linux: config.linux.effectiveMaxConcurrent)
-    }
-
-    /// The machine's memory, in GB.
-    var totalMemoryGB: Int { Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824) }
-
-    /// What jobs may collectively hold on this node, in GB.
-    var memoryBudgetGB: Int { config.node.memoryBudgetGB(totalGB: totalMemoryGB) }
-
-    /// Memory a job of these labels gets on this node, in GB.
-    func memoryGB(for job: Job) -> Int? {
-        job.memoryGB
-            ?? JobSizing.memoryGB(labels: job.labels, platform: job.platform, config: config)
-    }
-
-    /// What a job of unknown size is charged against the budget, in GB.
-    ///
-    /// Per platform, because the two are nowhere near each other: charging a
-    /// macOS VM the container default would book 1GB against a guest that takes
-    /// eight, and the budget would admit work the machine cannot hold. Where it
-    /// has to guess, it guesses high.
-    func defaultMemoryGB(for platform: JobPlatform) -> Int {
-        switch platform {
-        case .macos:
-            max(1, config.macos.memoryGB ?? MacOSConfig.baseImageDefaultMemoryGB)
-        case .linux:
-            max(1, config.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
-        }
-    }
-
-    func dispatchQueuedJobs() async throws {
-        var inUse = try await store.slotsInUse()
-        // Charged for jobs that predate sizing: the larger of the two defaults,
-        // since which platform an unsized survivor belonged to is exactly what
-        // is not known, and under-charging over-commits the machine.
-        var committedGB = try await store.committedMemoryGB(
-            fallbackGB: max(defaultMemoryGB(for: .macos), defaultMemoryGB(for: .linux)))
-        let budgetGB = memoryBudgetGB
-        let queued = try await store.jobs(status: .queued, limit: 50)
-            .sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
-
-        for job in queued {
-            let used = inUse[job.platform] ?? 0
-            guard used < capacity(for: job.platform) else { continue }
-            // Checked against the live total rather than a running counter, so
-            // a job dispatched earlier in this same loop counts against it.
-            guard inUse.values.reduce(0, +) < nodeCapacity else { break }
-            guard !blockedByOtherPlatform(job.platform, inUse: inUse) else { continue }
-
-            let wanted = memoryGB(for: job) ?? defaultMemoryGB(for: job.platform)
-            guard JobSizing.fits(memoryGB: wanted, committedGB: committedGB, budgetGB: budgetGB)
-            else {
-                // Head-of-line reservation. Skipping to a job that does fit
-                // would let a stream of small jobs starve a large one
-                // indefinitely, and the large one is usually the build that
-                // matters. Waiting costs throughput; starving costs the job.
-                break
-            }
-
-            inUse[job.platform] = used + 1
-            committedGB += wanted
-            await dispatch(job, memoryGB: wanted)
-        }
-    }
-
-    /// Whether the other platform is busy and this node runs one at a time.
-    ///
-    /// The two platforms share vmnet, and on this hardware they do not share
-    /// it well: started together, the VM never gets a bridge, times out, and
-    /// its teardown destroys the container's. Holding the job back costs a few
-    /// minutes; dispatching it costs the other job outright. See
-    /// `NodeConfig.serializePlatforms` for the measurements.
-    func blockedByOtherPlatform(_ platform: JobPlatform, inUse: [JobPlatform: Int]) -> Bool {
-        guard config.node.serializePlatforms else { return false }
-        return inUse.contains { $0.key != platform && $0.value > 0 }
     }
 
     func dispatch(_ job: Job, memoryGB: Int) async {

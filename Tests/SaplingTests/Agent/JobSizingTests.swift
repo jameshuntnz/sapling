@@ -126,6 +126,22 @@ struct JobSizingTests {
         #expect(MacOSConfig.baseImageDefaultMemoryGB > LinuxConfig.containerDefaultMemoryGB)
     }
 
+    /// Head-of-line reservation assumes the job at the front eventually fits.
+    ///
+    /// One larger than the whole budget never will, so a queue that waits for
+    /// it stalls the node permanently. Discovery refuses these, but config can
+    /// shrink under a job that is already queued — so admission has to step
+    /// over them rather than wait.
+    @Test("a job larger than the whole budget can never be waited for")
+    func impossibleJobNeverBlocks() {
+        // Never fits, whatever else finishes: committed is already zero.
+        #expect(!JobSizing.fits(memoryGB: 32, committedGB: 0, budgetGB: 12))
+        // Which is exactly why it must be identifiable as impossible, not
+        // merely as not-fitting-right-now.
+        #expect(JobSizing.unschedulableReason(memoryGB: 32, budgetGB: 12, ceilingGB: nil) != nil)
+        #expect(JobSizing.unschedulableReason(memoryGB: 12, budgetGB: 12, ceilingGB: nil) == nil)
+    }
+
     @Test("the budget is the machine less the host's reserve")
     func budget() {
         var node = NodeConfig()
