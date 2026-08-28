@@ -50,10 +50,8 @@ extension TartProvider {
                 return outcome
             } catch let error as VMAttachFailed {
                 lastFailure = error
-                // Captured before teardown, while the broken state still
-                // exists. The root cause is unknown and cannot be reproduced
-                // on demand, so this file is the only chance of diagnosing it.
-                await NetworkDiagnostics.captureAttachFailure(vmName: vmName, events: events)
+                // The capture already happened, inside `boot`, while the VM
+                // process was still alive — see the comment there.
                 await Self.teardown(vmName: vmName, events: events)
                 await NetworkAftercare.afterVMTeardown(events: events)
                 if attempt < Self.attachAttempts {

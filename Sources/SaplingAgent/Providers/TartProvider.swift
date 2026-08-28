@@ -94,7 +94,20 @@ public struct TartProvider: JobProvider, Sendable {
         }
         defer { bootTask.cancel() }
 
-        let ip = try await waitForIP(vmName: vmName, timeout: Self.attachTimeout, process: process)
+        // Captured here, inside the scope, and deliberately not in `run`'s
+        // catch block where it started out. `defer` cancels the boot task on
+        // the way out of this function, which kills `tart run` — so a capture
+        // taken after the throw recorded a state teardown had already created,
+        // and reported "no tart process" for a VM whose process had been alive
+        // until we killed it. A diagnostic that describes its own side effects
+        // is worse than none.
+        let ip: String
+        do {
+            ip = try await waitForIP(vmName: vmName, timeout: Self.attachTimeout, process: process)
+        } catch let failure as VMAttachFailed {
+            await NetworkDiagnostics.captureAttachFailure(vmName: vmName, events: events)
+            throw failure
+        }
         await events.record(RunEventName.vmBooted, detail: ip)
 
         // Asked of the host, before anything is asked of the guest: it costs

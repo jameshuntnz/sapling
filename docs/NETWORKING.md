@@ -329,6 +329,30 @@ written when the first job starts" — whether the rules were loaded, absent, or
 unreadable. It said that throughout the outage. There is now an `unverified`
 state that says so plainly and does not count as a problem.
 
+## What reproduction ruled out
+
+28 hand-run trials on a clean node, two guests each, classified by whether a
+host bridge owned each guest's address:
+
+| Trial set | Guests | Stagger | Result |
+|---|---|---|---|
+| 20 | `alpine` + base VM | 0, 1, 2, 3, 5s | 20 PASS |
+| 8 | 4GB container with `--rosetta` + 6GB VM | 0, 2s | 8 PASS |
+
+Zero failures, and zero leaked `vmenet` interfaces or `tart` wrappers across
+28 VM create/destroy cycles. So the fault is **not** simultaneity, not stagger,
+not guest size, and not memory pressure from the two guests coexisting.
+
+What the harness could not replicate, and what therefore remains suspect:
+
+- the `launchctl asuser … sudo -u admin` launch path the daemon uses, which
+  needs root to invoke
+- a container doing real work rather than sleeping
+- the daemon's own concurrent activity around a job start
+
+The third is why `AnchorWriter` exists. It is not known to be the cause, but it
+was a genuine concurrency defect found while looking for one.
+
 ## Rules for changing this
 
 - **Never treat a tool's own status as evidence about its network.** Compare
