@@ -63,58 +63,7 @@ struct ContainerProvider: JobProvider, Sendable {
     /// Where Rosetta lands when installed; its presence is the check.
     static let rosettaPath = "/Library/Apple/usr/libexec/oah"
 
-    /// How many times to build this container before giving the job up.
-    ///
-    /// The same count the macOS path gets, and for the same reason. A
-    /// container that comes up without a network is not a job that has failed:
-    /// observed in production, one failed twelve seconds in where a rebuild
-    /// would very likely have worked, and it failed outright because only the
-    /// VM path had a retry. That asymmetry cost a job.
-    static let attachAttempts = 3
-
-    func run(_ request: JobRunRequest, events: any EventSink) async throws -> JobOutcome {
-        let image = request.image ?? config.defaultImage
-        var lastFailure: (any Error)?
-
-        for attempt in 1...Self.attachAttempts {
-            // A fresh name per attempt, matching the macOS path: whatever a
-            // failed environment leaves behind is exactly what is not
-            // understood, so nothing is reused.
-            let name =
-                attempt == 1
-                ? Self.containerPrefix + request.runnerName
-                : "\(Self.containerPrefix)\(request.runnerName)-r\(attempt)"
-
-            do {
-                let outcome = try await start(
-                    name: name, image: image, request: request, events: events)
-                await Self.teardown(name: name, events: events)
-                return outcome
-            } catch let error as JobNetworkLost {
-                lastFailure = error
-                // Teardown first: the repair stops every container, and this
-                // one is on its way out anyway. Without the repair the next
-                // attempt starts into the same dead bridge and fails the same
-                // way, which is how a single lost bridge became an evening of
-                // failures.
-                await Self.teardown(name: name, events: events)
-                await Self.repairNetwork(after: name, events: events)
-                if attempt < Self.attachAttempts {
-                    await events.log(
-                        "\(error.localizedDescription) — rebuilding the container "
-                            + "(attempt \(attempt + 1) of \(Self.attachAttempts))")
-                }
-            } catch {
-                await Self.teardown(name: name, events: events)
-                throw error
-            }
-        }
-
-        throw ProviderError(
-            lastFailure?.localizedDescription ?? "the container never got a network")
-    }
-
-    private func start(
+    func start(
         name: String, image: String, request: JobRunRequest, events: any EventSink
     ) async throws -> JobOutcome {
         await events.log("pulling \(image)")
@@ -194,6 +143,16 @@ struct ContainerProvider: JobProvider, Sendable {
         // job's lost bridge arrives before the watchdog has finished confirming
         // it for another — and the job then carries "container exited with
         // status 137", which names the signal and not the cause.
+        // Direct evidence before inferred. A kill message watched streaming
+        // past says what happened; an orphaned address only says the network
+        // is gone, which is also true of a container killed for memory while
+        // its bridge happened to be down. Read the other way round, an
+        // out-of-memory build gets rebuilt three times — the one response
+        // guaranteed not to help, since it will run out of memory again.
+        if exitCode != 0, await killWatch.sawKill {
+            return JobOutcome(exitCode: exitCode, message: MemoryKill.reason(memoryGB: config.memoryGB))
+        }
+
         if exitCode != 0, let address = await observed.value,
             case .orphaned = await JobNetwork.reachability(of: address)
         {
@@ -208,9 +167,6 @@ struct ContainerProvider: JobProvider, Sendable {
         }
 
         guard exitCode != 0 else { return JobOutcome(exitCode: exitCode) }
-        if await killWatch.sawKill {
-            return JobOutcome(exitCode: exitCode, message: MemoryKill.reason(memoryGB: config.memoryGB))
-        }
         return JobOutcome(exitCode: exitCode, message: "container exited with status \(exitCode)")
     }
 
