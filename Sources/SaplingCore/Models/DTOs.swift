@@ -32,7 +32,18 @@ public struct StatusResponse: Codable, Sendable {
     /// The node this control plane manages.
     public var node: Node
     /// Slot usage, one entry per platform.
+    ///
+    /// Each entry's `capacity` is that platform's own ceiling. When
+    /// `nodeCapacity` is lower than their sum the platforms share one pool, so
+    /// the entries describe what each *may* run rather than what can run at
+    /// once — read `nodeCapacity` for the machine's real limit.
     public var slots: [SlotUsage]
+    /// Jobs this node runs at once across both platforms.
+    ///
+    /// Reported separately because the per-platform capacities can sum to more
+    /// than the machine allows: with two macOS slots, two Linux slots and a
+    /// node cap of two, any mix runs but never more than two at a time.
+    public var nodeCapacity: Int
     /// Jobs discovered but not yet started.
     public var queuedJobs: Int
     /// Jobs currently holding a slot.
@@ -60,6 +71,7 @@ public struct StatusResponse: Codable, Sendable {
         version: String,
         node: Node,
         slots: [SlotUsage],
+        nodeCapacity: Int = 0,
         queuedJobs: Int,
         runningJobs: Int,
         completedLast24h: Int,
@@ -73,6 +85,7 @@ public struct StatusResponse: Codable, Sendable {
         self.version = version
         self.node = node
         self.slots = slots
+        self.nodeCapacity = nodeCapacity
         self.queuedJobs = queuedJobs
         self.runningJobs = runningJobs
         self.completedLast24h = completedLast24h

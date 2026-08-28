@@ -123,6 +123,17 @@ extension NodeAgent {
         }
     }
 
+    /// Jobs this node will run at once across both platforms.
+    ///
+    /// The per-platform counts say what each platform may run; this says what
+    /// the machine may run in total. See `NodeConfig.maxConcurrent` for why
+    /// both are needed — RAM is shared and the per-platform counts cannot say so.
+    var nodeCapacity: Int {
+        config.node.effectiveMaxConcurrent(
+            macOS: config.macos.effectiveMaxConcurrent,
+            linux: config.linux.effectiveMaxConcurrent)
+    }
+
     func dispatchQueuedJobs() async throws {
         var inUse = try await store.slotsInUse()
         let queued = try await store.jobs(status: .queued, limit: 50)
@@ -131,6 +142,9 @@ extension NodeAgent {
         for job in queued {
             let used = inUse[job.platform] ?? 0
             guard used < capacity(for: job.platform) else { continue }
+            // Checked against the live total rather than a running counter, so
+            // a job dispatched earlier in this same loop counts against it.
+            guard inUse.values.reduce(0, +) < nodeCapacity else { break }
             guard !blockedByOtherPlatform(job.platform, inUse: inUse) else { continue }
             inUse[job.platform] = used + 1
             await dispatch(job)

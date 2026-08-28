@@ -52,18 +52,46 @@ public struct NodeConfig: Codable, Sendable {
     /// nobody has diagnosed yet — not as a default, and not as a fix.
     public var serializePlatforms: Bool
 
+    /// Ceiling on jobs running at once across *both* platforms.
+    ///
+    /// The per-platform `max_concurrent` values say what each platform may run;
+    /// this says what the machine may run in total, and the two are enforced
+    /// together. Set it to 2 on a node with two macOS slots and two Linux slots
+    /// and any mix is allowed — two VMs, two containers, or one of each — but
+    /// never three environments competing for the same RAM.
+    ///
+    /// This exists because RAM is the shared resource and the per-platform
+    /// counts cannot express that. Sizing each platform to fit alone is how a
+    /// machine ends up over-committed the moment both are busy: every half
+    /// looks reasonable and the total does not fit.
+    ///
+    /// `nil` leaves the node uncapped, so the per-platform counts alone decide.
+    public var maxConcurrent: Int?
+
+    /// Jobs this node will run at once, after clamping.
+    ///
+    /// Falls back to the sum of the platform ceilings, which is the uncapped
+    /// behaviour a node has when `max_concurrent` is absent.
+    public func effectiveMaxConcurrent(macOS: Int, linux: Int) -> Int {
+        guard let maxConcurrent else { return macOS + linux }
+        return max(0, min(maxConcurrent, macOS + linux))
+    }
+
     enum CodingKeys: String, CodingKey {
         case name
         case serializePlatforms = "serialize_platforms"
+        case maxConcurrent = "max_concurrent"
     }
 
     /// Creates a server configuration.
     public init(
         name: String = Host.current().localizedName ?? "sapling-node",
-        serializePlatforms: Bool = false
+        serializePlatforms: Bool = false,
+        maxConcurrent: Int? = nil
     ) {
         self.name = name
         self.serializePlatforms = serializePlatforms
+        self.maxConcurrent = maxConcurrent
     }
 
     /// Creates a server configuration.
@@ -74,6 +102,7 @@ public struct NodeConfig: Codable, Sendable {
             ?? Host.current().localizedName
             ?? "sapling-node"
         serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? false
+        maxConcurrent = try c.decodeIfPresent(Int.self, forKey: .maxConcurrent)
     }
 }
 

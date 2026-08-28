@@ -61,7 +61,27 @@ struct CapacityStepTests {
         #expect(CapacityStep.assess(totalGB: 128, slots: 2, perVMGB: 32).isOK)
     }
 
-    // MARK: - Linux containers
+    // MARK: - The shared slot pool
+
+    /// The node the measurements came from: 16GB, two slots, either platform.
+    @Test("two 6GB slots fit a 16GB machine, leaving the host its reserve")
+    func sharedPoolFits() {
+        let state = CapacityStep.assessNode(
+            totalGB: 16, slots: 2, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true)
+        #expect(state.isOK)
+        #expect(state.summary.contains("4GB left for the host"))
+    }
+
+    /// Worst case is every slot holding the *larger* environment, because with
+    /// a shared pool any slot may hold either.
+    @Test("budgets the larger environment in every slot")
+    func budgetsTheLargest() {
+        // An 8GB VM and a 4GB container: two slots could hold two VMs.
+        let state = CapacityStep.assessNode(
+            totalGB: 16, slots: 2, macPerVMGB: 8, linuxPerGB: 4, linuxEnabled: true)
+        #expect(!state.isOK)
+        #expect(state.summary.contains("16GB worst case"))
+    }
 
     /// The state the node was actually in.
     ///
@@ -69,8 +89,8 @@ struct CapacityStepTests {
     /// default and every large build was killed part way through.
     @Test("flags an unset linux.memory_gb as the 1GB default it really is")
     func flagsUnsetLinuxMemory() {
-        let state = CapacityStep.assessLinux(
-            totalGB: 16, macWantedGB: 0, slots: 2, perContainerGB: nil)
+        let state = CapacityStep.assessNode(
+            totalGB: 16, slots: 2, macPerVMGB: 6, linuxPerGB: nil, linuxEnabled: true)
         guard case .fixable(let reason) = state else {
             Issue.record("an unset size is a live under-provisioning, not ok: \(state)")
             return
@@ -79,80 +99,66 @@ struct CapacityStepTests {
         #expect(reason.contains("\(LinuxConfig.containerDefaultMemoryGB)GB"))
         // The symptom points at the build, so the message has to bridge the two.
         #expect(reason.contains("vanished daemon"))
-        // 16 - 4 host = 12, over 2 slots.
-        #expect(reason.contains("6"))
     }
 
-    /// A container can be sized and still be too small to finish a real build.
-    @Test("flags a configured size below the floor")
-    func flagsStarvedContainers() {
-        let state = CapacityStep.assessLinux(
-            totalGB: 16, macWantedGB: 0, slots: 2, perContainerGB: 2)
-        guard case .fixable = state else {
-            Issue.record("2GB per container should be flagged: \(state)")
+    /// 4GB is not a cautious floor — it is the value measured to OOM.
+    @Test("flags a size below the measured floor even when it fits")
+    func flagsStarvedEnvironments() {
+        // 2 x 4GB = 8GB fits inside 16GB comfortably, and still fails builds.
+        let state = CapacityStep.assessNode(
+            totalGB: 16, slots: 2, macPerVMGB: 4, linuxPerGB: 4, linuxEnabled: true)
+        guard case .fixable(let reason) = state else {
+            Issue.record("4GB fits but is the size that OOMs; it must be flagged: \(state)")
             return
         }
+        #expect(reason.contains("\(CapacityStep.minimumGB)GB"))
+        // It should say what this machine can actually afford.
+        #expect(reason.contains("6GB each"))
     }
 
-    @Test("accepts containers that fit beside the VMs")
-    func acceptsFittingContainers() {
-        let state = CapacityStep.assessLinux(
-            totalGB: 32, macWantedGB: 8, slots: 2, perContainerGB: 8)
-        #expect(state.isOK)
-    }
-
-    /// The whole point of budgeting both platforms in one step: each half looks
-    /// reasonable alone, and together they exceed the machine.
-    @Test("counts the VMs against the container budget")
-    func countsVMsAgainstContainers() {
-        // 16GB, 4 reserved, 2 VMs x 6GB = 12 — nothing at all is left.
-        let state = CapacityStep.assessLinux(
-            totalGB: 16, macWantedGB: 12, slots: 2, perContainerGB: 4)
+    @Test("over-committing the machine outright fails")
+    func overCommitFails() {
+        let state = CapacityStep.assessNode(
+            totalGB: 16, slots: 2, macPerVMGB: 8, linuxPerGB: 8, linuxEnabled: true)
         guard case .failed(let reason) = state else {
-            Issue.record("over-committing the host across platforms must fail: \(state)")
+            Issue.record("2 x 8GB on a 16GB machine must fail: \(state)")
             return
         }
-        #expect(reason.contains("linux.max_concurrent"))
-        // Same containers, on a machine with room for them.
+        #expect(reason.contains("node.max_concurrent"))
+    }
+
+    /// Raising the slot count is what makes a fitting node stop fitting.
+    @Test("the same sizes fail once the node runs more of them")
+    func slotsDriveTheBudget() {
         #expect(
-            CapacityStep.assessLinux(
-                totalGB: 32, macWantedGB: 12, slots: 2, perContainerGB: 4
+            CapacityStep.assessNode(
+                totalGB: 16, slots: 2, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true
+            ).isOK)
+        #expect(
+            !CapacityStep.assessNode(
+                totalGB: 16, slots: 3, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true
+            ).isOK)
+        // A bigger machine takes the same three.
+        #expect(
+            CapacityStep.assessNode(
+                totalGB: 32, slots: 3, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true
             ).isOK)
     }
 
-    @Test("says nothing about containers when Linux jobs are off")
+    @Test("a node with no slots accepts nothing and needs no memory")
+    func noSlots() {
+        #expect(
+            CapacityStep.assessNode(
+                totalGB: 16, slots: 0, macPerVMGB: nil, linuxPerGB: nil, linuxEnabled: false
+            ).isOK)
+    }
+
+    /// Linux off means the container default is irrelevant, not a warning.
+    @Test("does not warn about containers when Linux is disabled")
     func linuxDisabled() {
         #expect(
-            CapacityStep.assessLinux(
-                totalGB: 16, macWantedGB: 12, slots: 0, perContainerGB: nil
+            CapacityStep.assessNode(
+                totalGB: 16, slots: 1, macPerVMGB: 8, linuxPerGB: nil, linuxEnabled: false
             ).isOK)
-    }
-
-    // MARK: - Reporting both at once
-
-    /// A node wrong in two ways should say so once, not hide the second behind
-    /// the first and make someone re-run doctor to discover it.
-    @Test("reports both platforms, worst case winning")
-    func combinesBothPlatforms() {
-        let macFailed = CapacityStep.assess(totalGB: 16, slots: 2, perVMGB: 8)
-        let linuxFixable = CapacityStep.assessLinux(
-            totalGB: 16, macWantedGB: 16, slots: 2, perContainerGB: nil)
-        let combined = CapacityStep.combine(macFailed, linuxFixable)
-
-        guard case .failed(let reason) = combined else {
-            Issue.record("a failed platform must win over a fixable one: \(combined)")
-            return
-        }
-        #expect(reason.contains("macos.memory_gb"))
-        #expect(reason.contains("linux.memory_gb"))
-    }
-
-    @Test("an ok platform does not mask the other")
-    func okDoesNotMask() {
-        let ok = StepState.ok("macOS jobs are disabled")
-        let starved = CapacityStep.assessLinux(
-            totalGB: 16, macWantedGB: 0, slots: 2, perContainerGB: 1)
-        #expect(!CapacityStep.combine(ok, starved).isOK)
-        #expect(CapacityStep.combine(ok, .ok("fine")).isOK)
     }
 }

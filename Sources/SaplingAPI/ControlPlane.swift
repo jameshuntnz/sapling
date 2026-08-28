@@ -45,6 +45,9 @@ struct ControlPlane: Sendable {
                 capacity: config.linux.effectiveMaxConcurrent
             ),
         ]
+        let nodeCapacity = config.node.effectiveMaxConcurrent(
+            macOS: config.macos.effectiveMaxConcurrent,
+            linux: config.linux.effectiveMaxConcurrent)
 
         let dayAgo = Date().addingTimeInterval(-86400)
         let lastPollRaw = try await store.state(SaplingStore.StateKey.lastPollAt)
@@ -62,6 +65,7 @@ struct ControlPlane: Sendable {
             version: SaplingVersion.current,
             node: node,
             slots: slots,
+            nodeCapacity: nodeCapacity,
             queuedJobs: try await store.countJobs(status: .queued),
             runningJobs: (inUse[.macos] ?? 0) + (inUse[.linux] ?? 0),
             completedLast24h: try await store.countJobs(status: .completed, since: dayAgo),
