@@ -53,6 +53,24 @@ extension ContainerProvider {
     ///   - events: Where the decision is recorded.
     static func repairNetwork(after name: String?, events: any EventSink) async {
         let bridges = (try? await BridgeTable.current()) ?? []
+
+        // A VM counts as a bystander too, and this is not theoretical: the
+        // repair was watched restarting the container system while a macOS VM
+        // was mid-boot, and the VM's bridge went with it — turning one failed
+        // job into two. The guard used to consider containers only, on the
+        // assumption that recreating the *container* network could not affect
+        // a VM. It can.
+        let liveVMs = await liveVirtualMachines(bridges: bridges)
+        guard liveVMs.isEmpty else {
+            await events.log(
+                """
+                the container network needs recreating, but \(liveVMs.count) macOS VM(s) are \
+                running with working networks and a restart has been observed taking theirs \
+                down too; leaving it for the next idle moment
+                """)
+            return
+        }
+
         let live = liveBystanders(
             among: await ContainerListing.current(), bridges: bridges, sparing: name)
         guard live.isEmpty else {
@@ -66,6 +84,26 @@ extension ContainerProvider {
         }
         await events.log("recreating the container network (`container system` restart)")
         await restartContainerSystem()
+    }
+
+    /// VMs a container-system restart would harm: running, and still reachable.
+    ///
+    /// One that is already orphaned has nothing left to lose, so it does not
+    /// block a repair — the same test applied to containers.
+    static func liveVirtualMachines(bridges: [HostBridge]) async -> [String] {
+        var live: [String] = []
+        for vm in await TartListing.current() where vm.isRunning {
+            guard let address = await TartProvider.address(ofVM: vm.name) else {
+                // No address to judge by. "We could not tell" is not grounds
+                // for pulling the network out from under someone's job.
+                live.append(vm.name)
+                continue
+            }
+            if JobNetwork.reachability(of: address, in: bridges) != .orphaned(address: address) {
+                live.append(vm.name)
+            }
+        }
+        return live
     }
 
     /// Containers a restart would harm: running, not this job's own, and still

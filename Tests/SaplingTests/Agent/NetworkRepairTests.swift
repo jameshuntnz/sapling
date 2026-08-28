@@ -103,3 +103,64 @@ struct KilledContainerTests {
                 == .live(gateway: "192.168.64.1"))
     }
 }
+
+/// Recreating the container network was watched taking a running macOS VM's
+/// bridge down with it, turning one failed job into two.
+///
+/// The guard used to consider containers only, on the assumption that
+/// recreating the *container* network could not affect a VM. It can.
+@Suite("Repair spares running VMs")
+struct RepairSparesVMsTests {
+    static let bridges = [
+        HostBridge(name: "bridge100", address: "192.168.65.1", subnet: "192.168.65.0/24", prefix: 24)
+    ]
+
+    /// A VM on a working bridge is a job running fine.
+    @Test("a reachable VM address counts as live")
+    func reachableVMIsLive() {
+        #expect(
+            JobNetwork.reachability(of: "192.168.65.80", in: Self.bridges)
+                == .live(gateway: "192.168.65.1"))
+    }
+
+    /// One already stranded has nothing left to lose, so it must not block a
+    /// repair the rest of the node needs.
+    @Test("an orphaned VM address does not count as live")
+    func orphanedVMIsNotLive() {
+        #expect(
+            JobNetwork.reachability(of: "192.168.65.80", in: [])
+                == .orphaned(address: "192.168.65.80"))
+    }
+
+    /// Both platforms are consulted before anything is restarted.
+    @Test("the repair asks about VMs as well as containers")
+    func repairConsultsBothPlatforms() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(
+                "Sources/SaplingAgent/Providers/ContainerProvider+Network.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        guard let vms = source.range(of: "liveVirtualMachines(bridges:"),
+            let restart = source.range(of: "await restartContainerSystem()")
+        else {
+            Issue.record("the repair no longer checks VMs or no longer restarts")
+            return
+        }
+        #expect(vms.lowerBound < restart.lowerBound, "VMs must be checked before the restart")
+    }
+}
+
+/// Both platforms rebuild an environment that comes up without a network.
+///
+/// The asymmetry was real and it cost a job: a container failed twelve seconds
+/// in and failed the job outright, while a VM in the same state got three
+/// attempts.
+@Suite("Retry symmetry")
+struct RetrySymmetryTests {
+    @Test("containers get the same number of attempts as VMs")
+    func attemptsMatch() {
+        #expect(ContainerProvider.attachAttempts == TartProvider.attachAttempts)
+        #expect(ContainerProvider.attachAttempts > 1)
+    }
+}

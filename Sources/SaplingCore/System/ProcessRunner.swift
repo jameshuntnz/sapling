@@ -90,6 +90,7 @@ public enum ProcessRunner {
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
                         try process.run()
+                        isolate(process)
                     } catch {
                         continuation.resume(throwing: error)
                         return
@@ -131,10 +132,10 @@ public enum ProcessRunner {
                         let proc = processBox.current
                         if proc.isRunning {
                             timedOut.withLock { $0 = true }
-                            proc.terminate()
+                            terminate(tree: proc)
                             // Give it a moment to exit cleanly, then insist.
                             try? await Task.sleep(for: .seconds(5))
-                            if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
+                            if proc.isRunning { terminate(tree: proc, signal: SIGKILL) }
                         }
                     }
                 }
@@ -142,7 +143,46 @@ public enum ProcessRunner {
             return result
         } onCancel: {
             let proc = processBox.current
-            if proc.isRunning { proc.terminate() }
+            if proc.isRunning { terminate(tree: proc) }
+        }
+    }
+
+    /// Put a freshly launched child in its own process group.
+    ///
+    /// `Process.terminate()` signals the child and nothing else, which is not
+    /// enough here. Provider commands are launched as
+    /// `launchctl asuser <uid> sudo -u <user> … <tool>`, so the child is
+    /// `launchctl` and the tool doing the actual work is its grandchild.
+    /// Terminating the child left `sudo` and the tool running, reparented to
+    /// PID 1 — and a `tart run` that survives its own cancellation is what
+    /// corrupted vmnet, because teardown then deleted a VM whose process was
+    /// still holding an interface.
+    ///
+    /// Best effort, and deliberately so: `setpgid` fails with `EACCES` once
+    /// the child has already `exec`ed, which is a race no caller can win and
+    /// which costs nothing — `terminate(tree:)` falls back to signalling the
+    /// child alone when the group was not created.
+    private static func isolate(_ process: Process) {
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        _ = setpgid(pid, pid)
+    }
+
+    /// Signal a child and everything it started.
+    ///
+    /// Falls back to the plain child signal when the process group could not
+    /// be created, so this is never worse than what it replaces.
+    static func terminate(tree process: Process, signal: Int32 = SIGTERM) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        if getpgid(pid) == pid {
+            // Negative pid means "the whole process group".
+            kill(-pid, signal)
+        } else if signal == SIGKILL {
+            kill(pid, SIGKILL)
+        } else {
+            process.terminate()
         }
     }
 
@@ -226,6 +266,7 @@ public enum ProcessRunner {
 
             do {
                 try process.run()
+                isolate(process)
             } catch {
                 continuation.finish(throwing: error)
                 return
@@ -233,7 +274,7 @@ public enum ProcessRunner {
 
             continuation.onTermination = { reason in
                 if case .cancelled = reason, process.isRunning {
-                    process.terminate()
+                    terminate(tree: process)
                 }
             }
         }
