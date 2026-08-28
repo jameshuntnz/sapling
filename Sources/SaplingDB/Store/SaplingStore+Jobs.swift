@@ -87,6 +87,21 @@ extension SaplingStore {
     /// Kept separate from `updateJobStatus` because it is answered once, at
     /// dispatch, and never revised — a job that ran in an image did so in that
     /// image, whatever the config says later.
+    /// Records the memory a job was admitted against, in GB.
+    ///
+    /// Records the memory a job was admitted against, in GB.
+    ///
+    /// Written when the slot is claimed, so a restart can total what running
+    /// jobs hold rather than guess it.
+    public func setJobMemoryGB(id: String, memoryGB: Int) async throws {
+        try await writer.write { db in
+            guard var record = try JobRecord.fetchOne(db, key: id) else { return }
+            record.memoryGB = memoryGB
+            try record.update(db)
+        }
+    }
+
+    /// Records the image a job actually ran in.
     public func setJobImageRef(id: String, imageRef: String) async throws {
         try await writer.write { db in
             guard var record = try JobRecord.fetchOne(db, key: id) else { return }
@@ -106,6 +121,33 @@ extension SaplingStore {
                 .filter(Column("updated_at") >= cutoff)
                 .fetchAll(db)
                 .compactMap(\.imageRef)
+        }
+    }
+
+    /// Memory reserved by every job currently holding a slot, in GB.
+    ///
+    /// The scheduler's real budget line.
+    ///
+    /// Summed from the database rather than tracked in memory so it survives a
+    /// daemon restart: jobs outlive the process that started them, and
+    /// admitting work against memory a survivor is still holding is how a node
+    /// over-commits itself after a crash.
+    ///
+    /// - Parameter fallbackGB: Charged for jobs recorded before sizes existed.
+    /// - Returns: Total GB reserved across both platforms.
+    /// - Throws: If the database cannot be read.
+    public func committedMemoryGB(fallbackGB: Int) async throws -> Int {
+        let active = JobStatus.allCases.filter(\.occupiesSlot).map(\.rawValue)
+        return try await writer.read { db in
+            let placeholders = active.map { _ in "?" }.joined(separator: ",")
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT memory_gb FROM jobs WHERE status IN (\(placeholders))",
+                arguments: StatementArguments(active)
+            )
+            return rows.reduce(0) { total, row in
+                total + ((row["memory_gb"] as Int?) ?? fallbackGB)
+            }
         }
     }
 

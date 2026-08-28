@@ -27,6 +27,9 @@ public struct CapacityStep: InstallStep {
     public let name = "Capacity"
 
     /// RAM to leave for the host: macOS, the daemon, and the container system.
+    ///
+    /// Mirrors `node.memory_reserve_gb`, which is what the scheduler actually
+    /// subtracts; this is the default the same arithmetic assumes.
     static let hostReserveGB = 4
 
     /// Least memory an environment gets before this step calls it starved.
@@ -53,7 +56,11 @@ public struct CapacityStep: InstallStep {
             linux: config.linux.effectiveMaxConcurrent)
     }
 
-    /// Reports whether the configured concurrency fits in the machine's RAM.
+    /// Reports whether the configured defaults fit in the machine's RAM.
+    ///
+    /// The scheduler rations memory job by job, so this is no longer the thing
+    /// standing between the node and an over-commit — it is the check that the
+    /// *defaults* are sane, which is what decides how many ordinary jobs fit.
     public func check() async -> StepState {
         let totalGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
         return Self.assessNode(

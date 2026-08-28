@@ -23,6 +23,13 @@ struct JobRunRequest: Sendable {
     let cache: CacheConfig?
     let bootTimeout: Duration
     let jobTimeout: Duration
+    /// Memory this job was admitted against, in GB.
+    ///
+    /// Passed rather than read from config by the provider: the scheduler
+    /// rationed the node's memory against this exact number, so the environment
+    /// has to be built with it. A provider consulting config instead could hand
+    /// the job a different size than the one the budget reserved.
+    let memoryGB: Int?
 
     init(
         jobID: String,
@@ -34,7 +41,8 @@ struct JobRunRequest: Sendable {
         environment: [String: String] = [:],
         cache: CacheConfig? = nil,
         bootTimeout: Duration = .seconds(300),
-        jobTimeout: Duration = .seconds(7200)
+        jobTimeout: Duration = .seconds(7200),
+        memoryGB: Int? = nil
     ) {
         self.jobID = jobID
         self.repo = repo
@@ -46,6 +54,7 @@ struct JobRunRequest: Sendable {
         self.cache = cache
         self.bootTimeout = bootTimeout
         self.jobTimeout = jobTimeout
+        self.memoryGB = memoryGB
     }
 }
 

@@ -3,7 +3,7 @@
 .DEFAULT_GOAL := help
 SWIFT ?= swift
 
-.PHONY: help build test lint format sizes check app clean
+.PHONY: help build test coverage lint format sizes check app clean
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -14,6 +14,15 @@ build: ## Build everything
 
 test: ## Run the test suite
 	$(SWIFT) test
+
+# `swift test --show-codecov-path` gives the exported JSON, not the profile
+# llvm-cov wants, so the profdata path is spelled out.
+coverage: ## Report test coverage per file
+	@$(SWIFT) test --enable-code-coverage >/dev/null
+	@BIN=$$($(SWIFT) build --show-bin-path); xcrun llvm-cov report \
+		"$$BIN/SaplingPackageTests.xctest/Contents/MacOS/SaplingPackageTests" \
+		-instr-profile "$$BIN/codecov/default.profdata" \
+		-ignore-filename-regex='Tests|\.build'
 
 lint: ## Fail on style or documentation violations
 	@./scripts/lint.sh

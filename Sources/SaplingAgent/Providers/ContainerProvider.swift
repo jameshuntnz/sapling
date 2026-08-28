@@ -150,7 +150,11 @@ struct ContainerProvider: JobProvider, Sendable {
         // out-of-memory build gets rebuilt three times — the one response
         // guaranteed not to help, since it will run out of memory again.
         if exitCode != 0, await killWatch.sawKill {
-            return JobOutcome(exitCode: exitCode, message: MemoryKill.reason(memoryGB: config.memoryGB))
+            let sized = request.memoryGB ?? config.memoryGB
+            let proven = await killWatch.confirmed
+            return JobOutcome(
+                exitCode: exitCode,
+                message: MemoryKill.reason(memoryGB: sized, confirmed: proven))
         }
 
         if exitCode != 0, let address = await observed.value,
@@ -180,7 +184,9 @@ struct ContainerProvider: JobProvider, Sendable {
     func runArguments(name: String, image: String, request: JobRunRequest) -> [String] {
         var args = ["run", "--rm", "--name", name]
         if let cpu = config.cpuCount { args += ["--cpus", String(cpu)] }
-        if let memory = config.memoryGB { args += ["--memory", "\(memory)g"] }
+        if let memory = request.memoryGB ?? config.memoryGB {
+            args += ["--memory", "\(memory)g"]
+        }
         if let arch = config.arch { args += ["--arch", arch] }
         if config.rosetta { args.append("--rosetta") }
         for (key, value) in request.environment.sorted(by: { $0.key < $1.key }) {
@@ -198,6 +204,7 @@ struct ContainerProvider: JobProvider, Sendable {
         """
         set -euo pipefail
         \(EgressCheck.probeScript)
+        \(MemoryKill.watchScript)
         \(CacheEndpoint.exportScript(cache: request.cache, platform: .linux))
         if [ -x /home/runner/run.sh ]; then
           cd /home/runner

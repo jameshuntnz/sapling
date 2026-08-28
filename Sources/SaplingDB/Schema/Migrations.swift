@@ -76,6 +76,17 @@ enum SaplingMigrations {
             }
         }
 
+        // Memory is what the scheduler actually rations, so it has to survive a
+        // restart: the daemon coming back mid-job must know what that job is
+        // holding, or it will admit work against memory it has already given
+        // away. Nullable, because a job that predates this simply never
+        // recorded one — the platform default is the honest answer for it.
+        migrator.registerMigration("v4_job_memory_gb") { db in
+            try db.alter(table: "jobs") { t in
+                t.add(column: "memory_gb", .integer)
+            }
+        }
+
         return migrator
     }
 }

@@ -63,6 +63,22 @@ extension NodeAgent {
         for job in try await github.queuedJobs(repo: repo) {
             seen.insert(String(job.id))
             guard let platform = platform(matching: job.labels) else { continue }
+
+            // Refused here rather than queued. A request this node can never
+            // satisfy is not a job waiting for capacity, it is a job waiting
+            // forever, and a queue that silently holds one is worse than a
+            // workflow that fails saying why.
+            let sized = JobSizing.memoryGB(
+                labels: job.labels, platform: platform, config: config)
+            if let reason = JobSizing.unschedulableReason(
+                memoryGB: sized,
+                budgetGB: memoryBudgetGB,
+                ceilingGB: platform == .macos ? config.macos.maxMemoryGB : config.linux.maxMemoryGB)
+            {
+                Log.error("refusing \(repo) #\(job.id): \(reason)")
+                continue
+            }
+
             let record = Job(
                 id: String(job.id),
                 nodeID: nodeID,
@@ -72,7 +88,8 @@ extension NodeAgent {
                 labels: job.labels,
                 status: .queued,
                 name: job.name,
-                queuedAt: Date()
+                queuedAt: Date(),
+                memoryGB: sized
             )
             if try await store.insertJobIfNew(record) {
                 Log.info("queued \(repo) #\(job.id) \"\(job.name)\" (\(platform.rawValue))")
@@ -101,12 +118,12 @@ extension NodeAgent {
     /// Which platform, if any, can run a job with these labels.
     ///
     /// Matches GitHub's own rule: a runner is eligible when its label set is
-    /// a superset of the job's — with `image:` selectors removed first, since
-    /// they name a container image rather than a capability the node has to
-    /// advertise. Leaving one in would make every job that asks for an image
-    /// ineligible everywhere.
+    /// a superset of the job's — with `image:` and `mem:` selectors removed
+    /// first, since they name what the job wants rather than a capability the
+    /// node has to advertise. Leaving either in would make every job that asks
+    /// for an image or a memory size ineligible everywhere.
     func platform(matching labels: [String]) -> JobPlatform? {
-        let requested = Set(RunnerImageSelector.split(labels).capabilities)
+        let requested = Set(RunnerImageSelector.parse(labels).capabilities)
         if config.macos.enabled, requested.isSubset(of: Set(config.macos.labels)) {
             return .macos
         }
@@ -134,8 +151,23 @@ extension NodeAgent {
             linux: config.linux.effectiveMaxConcurrent)
     }
 
+    /// The machine's memory, in GB.
+    var totalMemoryGB: Int { Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824) }
+
+    /// What jobs may collectively hold on this node, in GB.
+    var memoryBudgetGB: Int { config.node.memoryBudgetGB(totalGB: totalMemoryGB) }
+
+    /// Memory a job of these labels gets on this node, in GB.
+    func memoryGB(for job: Job) -> Int? {
+        job.memoryGB
+            ?? JobSizing.memoryGB(labels: job.labels, platform: job.platform, config: config)
+    }
+
     func dispatchQueuedJobs() async throws {
         var inUse = try await store.slotsInUse()
+        let defaultGB = max(1, config.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
+        var committedGB = try await store.committedMemoryGB(fallbackGB: defaultGB)
+        let budgetGB = memoryBudgetGB
         let queued = try await store.jobs(status: .queued, limit: 50)
             .sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
 
@@ -146,8 +178,20 @@ extension NodeAgent {
             // a job dispatched earlier in this same loop counts against it.
             guard inUse.values.reduce(0, +) < nodeCapacity else { break }
             guard !blockedByOtherPlatform(job.platform, inUse: inUse) else { continue }
+
+            let wanted = memoryGB(for: job) ?? defaultGB
+            guard JobSizing.fits(memoryGB: wanted, committedGB: committedGB, budgetGB: budgetGB)
+            else {
+                // Head-of-line reservation. Skipping to a job that does fit
+                // would let a stream of small jobs starve a large one
+                // indefinitely, and the large one is usually the build that
+                // matters. Waiting costs throughput; starving costs the job.
+                break
+            }
+
             inUse[job.platform] = used + 1
-            await dispatch(job)
+            committedGB += wanted
+            await dispatch(job, memoryGB: wanted)
         }
     }
 
@@ -163,11 +207,15 @@ extension NodeAgent {
         return inUse.contains { $0.key != platform && $0.value > 0 }
     }
 
-    func dispatch(_ job: Job) async {
+    func dispatch(_ job: Job, memoryGB: Int) async {
         // Claim the slot in the database before anything can await, so the
         // next poll cycle can't see this job as still queued.
         do {
             let attempt = try await store.claimJob(id: job.id)
+            // Recorded with the claim, so the reservation and the slot are
+            // taken in the same breath — a restart between the two would leave
+            // a running job the budget cannot see.
+            try await store.setJobMemoryGB(id: job.id, memoryGB: memoryGB)
             try await store.appendEvent(
                 jobID: job.id,
                 event: RunEventName.jobClaimed,
@@ -178,9 +226,11 @@ extension NodeAgent {
             return
         }
 
+        var sized = job
+        sized.memoryGB = memoryGB
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.execute(job)
+            await self.execute(sized)
             await self.finishTracking(jobID: job.id)
         }
         runningJobs[job.id] = task

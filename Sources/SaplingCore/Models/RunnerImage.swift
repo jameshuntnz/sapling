@@ -18,24 +18,69 @@ public enum RunnerImageSelector {
     /// Label prefix that marks an image selector rather than a capability.
     public static let labelPrefix = "image:"
 
+    /// Label prefix that asks for a memory size, in GB.
+    ///
+    /// `mem:6` on a job means "this one needs six gigabytes", overriding the
+    /// platform default. It is a selector rather than a capability for the same
+    /// reason `image:` is: the node cannot advertise every size a workflow might
+    /// ask for, so leaving it among the capabilities would make every job that
+    /// requests memory ineligible everywhere.
+    public static let memoryLabelPrefix = "mem:"
+
     /// Splits runner labels into capability labels and the requested image.
     ///
     /// Returns `nil` for the image when no selector is present, which is the
     /// common case and means the node's configured default is used.
     public static func split(_ labels: [String]) -> (capabilities: [String], image: String?) {
+        let parsed = parse(labels)
+        return (parsed.capabilities, parsed.image)
+    }
+
+    /// Splits runner labels into capabilities, image, and requested memory.
+    ///
+    /// Every selector has to be stripped from `capabilities` here. Label
+    /// matching is a subset test against what the node advertises, so a
+    /// selector left in the list is a label the node will never have — which
+    /// silently makes the job unroutable rather than loudly wrong.
+    ///
+    /// - Parameter labels: The `runs-on` labels from the workflow.
+    /// - Returns: Capabilities to match on, the image, and memory in GB.
+    public static func parse(
+        _ labels: [String]
+    ) -> (capabilities: [String], image: String?, memoryGB: Int?) {
         var capabilities: [String] = []
         var image: String?
+        var memoryGB: Int?
         for label in labels {
-            guard label.hasPrefix(labelPrefix) else {
+            if label.hasPrefix(labelPrefix) {
+                // Last one wins. Two selectors is a workflow bug, but silently
+                // picking the first would make it harder to spot than honouring
+                // the one nearest the end of the list.
+                image = String(label.dropFirst(labelPrefix.count))
+            } else if label.hasPrefix(memoryLabelPrefix) {
+                memoryGB = parseMemoryGB(String(label.dropFirst(memoryLabelPrefix.count)))
+            } else {
                 capabilities.append(label)
-                continue
             }
-            // Last one wins. Two selectors is a workflow bug, but silently
-            // picking the first would make it harder to spot than honouring
-            // the one nearest the end of the list.
-            image = String(label.dropFirst(labelPrefix.count))
         }
-        return (capabilities, image)
+        return (capabilities, image, memoryGB)
+    }
+
+    /// Reads `6` or `6g` as six gigabytes.
+    ///
+    /// Returns `nil` for anything it does not understand, which leaves the job
+    /// on the platform default. Guessing at a malformed size would hand a build
+    /// silently less memory than the workflow asked for — the failure this
+    /// whole selector exists to prevent.
+    public static func parseMemoryGB(_ text: String) -> Int? {
+        var digits = text.lowercased()
+        if digits.hasSuffix("gb") {
+            digits = String(digits.dropLast(2))
+        } else if digits.hasSuffix("g") {
+            digits = String(digits.dropLast())
+        }
+        guard let value = Int(digits), value > 0, value <= 1024 else { return nil }
+        return value
     }
 
     /// Whether a selector is safe to use as a directory name.

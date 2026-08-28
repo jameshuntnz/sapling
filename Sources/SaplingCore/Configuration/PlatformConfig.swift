@@ -31,8 +31,19 @@ public struct MacOSConfig: Codable, Sendable {
     public var jobTimeoutSeconds: Int
     /// CPU cores per environment. `nil` uses the tool's default.
     public var cpuCount: Int?
-    /// Memory per environment in GB. `nil` uses the tool's default.
+    /// Default memory per job in GB, when the workflow doesn't ask for a size.
+    ///
+    /// A job overrides this with a `mem:` label. `nil` falls through to the
+    /// tool's own default, which is rarely what anyone wants — see
+    /// `containerDefaultMemoryGB`.
     public var memoryGB: Int?
+    /// Largest size a `mem:` label may ask for on this platform, in GB.
+    ///
+    /// A ceiling on what a workflow can request, separate from what the machine
+    /// happens to have: a repository asking for 64GB should be told its request
+    /// is refused, not left queued forever on a node that can never satisfy it.
+    /// `nil` means only the node's memory budget limits it.
+    public var maxMemoryGB: Int?
 
     /// `maxConcurrent` clamped to Apple's limit.
     ///
@@ -52,6 +63,7 @@ public struct MacOSConfig: Codable, Sendable {
         case jobTimeoutSeconds = "job_timeout_seconds"
         case cpuCount = "cpu_count"
         case memoryGB = "memory_gb"
+        case maxMemoryGB = "max_memory_gb"
     }
 
     /// Creates a platform configuration.
@@ -65,7 +77,8 @@ public struct MacOSConfig: Codable, Sendable {
         bootTimeoutSeconds: Int = 300,
         jobTimeoutSeconds: Int = 7200,
         cpuCount: Int? = nil,
-        memoryGB: Int? = nil
+        memoryGB: Int? = nil,
+        maxMemoryGB: Int? = nil
     ) {
         self.enabled = enabled
         self.baseImage = baseImage
@@ -77,6 +90,7 @@ public struct MacOSConfig: Codable, Sendable {
         self.jobTimeoutSeconds = jobTimeoutSeconds
         self.cpuCount = cpuCount
         self.memoryGB = memoryGB
+        self.maxMemoryGB = maxMemoryGB
     }
 
     /// Creates a platform configuration.
@@ -92,6 +106,7 @@ public struct MacOSConfig: Codable, Sendable {
         jobTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .jobTimeoutSeconds) ?? 7200
         cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount)
         memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
+        maxMemoryGB = try c.decodeIfPresent(Int.self, forKey: .maxMemoryGB)
     }
 }
 
@@ -113,8 +128,19 @@ public struct LinuxConfig: Codable, Sendable {
     public var jobTimeoutSeconds: Int
     /// CPU cores per environment. `nil` uses the tool's default.
     public var cpuCount: Int?
-    /// Memory per environment in GB. `nil` uses the tool's default.
+    /// Default memory per job in GB, when the workflow doesn't ask for a size.
+    ///
+    /// A job overrides this with a `mem:` label. `nil` falls through to the
+    /// tool's own default, which is rarely what anyone wants — see
+    /// `containerDefaultMemoryGB`.
     public var memoryGB: Int?
+    /// Largest size a `mem:` label may ask for on this platform, in GB.
+    ///
+    /// A ceiling on what a workflow can request, separate from what the machine
+    /// happens to have: a repository asking for 64GB should be told its request
+    /// is refused, not left queued forever on a node that can never satisfy it.
+    /// `nil` means only the node's memory budget limits it.
+    public var maxMemoryGB: Int?
     /// Image architecture to run. `nil` uses the host's, which is `arm64` here.
     ///
     /// Set this only to run a foreign-architecture image outright; to run the
@@ -169,6 +195,7 @@ public struct LinuxConfig: Codable, Sendable {
         case jobTimeoutSeconds = "job_timeout_seconds"
         case cpuCount = "cpu_count"
         case memoryGB = "memory_gb"
+        case maxMemoryGB = "max_memory_gb"
     }
 
     /// Creates a platform configuration.
@@ -180,6 +207,7 @@ public struct LinuxConfig: Codable, Sendable {
         jobTimeoutSeconds: Int = 7200,
         cpuCount: Int? = nil,
         memoryGB: Int? = nil,
+        maxMemoryGB: Int? = nil,
         arch: String? = nil,
         rosetta: Bool = false,
         buildImages: Bool = true,
@@ -192,6 +220,7 @@ public struct LinuxConfig: Codable, Sendable {
         self.jobTimeoutSeconds = jobTimeoutSeconds
         self.cpuCount = cpuCount
         self.memoryGB = memoryGB
+        self.maxMemoryGB = maxMemoryGB
         self.arch = arch
         self.rosetta = rosetta
         self.buildImages = buildImages
@@ -210,6 +239,7 @@ public struct LinuxConfig: Codable, Sendable {
         jobTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .jobTimeoutSeconds) ?? 7200
         cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount)
         memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
+        maxMemoryGB = try c.decodeIfPresent(Int.self, forKey: .maxMemoryGB)
         arch = try c.decodeIfPresent(String.self, forKey: .arch)
         rosetta = try c.decodeIfPresent(Bool.self, forKey: .rosetta) ?? false
         buildImages = try c.decodeIfPresent(Bool.self, forKey: .buildImages) ?? true

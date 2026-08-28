@@ -146,6 +146,14 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
     /// later config change — "which image was this built in" has to stay
     /// answerable for a job that already ran.
     public var imageRef: String?
+    /// Memory reserved for this job, in GB, once it has been sized.
+    ///
+    /// Recorded rather than recomputed for the same reason as `imageRef`, and
+    /// one more: the scheduler rations memory against it, so a daemon that
+    /// restarts mid-job has to know what the survivors are holding. Recomputing
+    /// from config would silently change a running job's reservation the moment
+    /// somebody edited a default.
+    public var memoryGB: Int?
 
     /// Creates a job record.
     public init(
@@ -161,7 +169,8 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
         startedAt: Date? = nil,
         completedAt: Date? = nil,
         exitReason: String? = nil,
-        imageRef: String? = nil
+        imageRef: String? = nil,
+        memoryGB: Int? = nil
     ) {
         self.id = id
         self.nodeID = nodeID
@@ -176,6 +185,7 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
         self.completedAt = completedAt
         self.exitReason = exitReason
         self.imageRef = imageRef
+        self.memoryGB = memoryGB
     }
 
     /// How long the job has been running, or how long it ran.

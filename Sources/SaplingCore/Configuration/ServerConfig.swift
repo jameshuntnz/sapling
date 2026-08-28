@@ -68,6 +68,22 @@ public struct NodeConfig: Codable, Sendable {
     /// `nil` leaves the node uncapped, so the per-platform counts alone decide.
     public var maxConcurrent: Int?
 
+    /// RAM to keep for the host, in GB: macOS, the daemon, the container system.
+    ///
+    /// Everything above this is the job budget, and admission stops when the
+    /// next job's memory would cross it. Kept configurable because the right
+    /// figure is a property of the machine — a node doing nothing else needs
+    /// less than one that is also somebody's desktop.
+    public var memoryReserveGB: Int
+
+    /// Memory available to jobs on a machine of this size, in GB.
+    ///
+    /// - Parameter totalGB: The machine's physical memory.
+    /// - Returns: What jobs may collectively hold, never negative.
+    public func memoryBudgetGB(totalGB: Int) -> Int {
+        max(0, totalGB - memoryReserveGB)
+    }
+
     /// Jobs this node will run at once, after clamping.
     ///
     /// Falls back to the sum of the platform ceilings, which is the uncapped
@@ -81,17 +97,20 @@ public struct NodeConfig: Codable, Sendable {
         case name
         case serializePlatforms = "serialize_platforms"
         case maxConcurrent = "max_concurrent"
+        case memoryReserveGB = "memory_reserve_gb"
     }
 
     /// Creates a server configuration.
     public init(
         name: String = Host.current().localizedName ?? "sapling-node",
         serializePlatforms: Bool = false,
-        maxConcurrent: Int? = nil
+        maxConcurrent: Int? = nil,
+        memoryReserveGB: Int = 4
     ) {
         self.name = name
         self.serializePlatforms = serializePlatforms
         self.maxConcurrent = maxConcurrent
+        self.memoryReserveGB = memoryReserveGB
     }
 
     /// Creates a server configuration.
@@ -103,6 +122,7 @@ public struct NodeConfig: Codable, Sendable {
             ?? "sapling-node"
         serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? false
         maxConcurrent = try c.decodeIfPresent(Int.self, forKey: .maxConcurrent)
+        memoryReserveGB = try c.decodeIfPresent(Int.self, forKey: .memoryReserveGB) ?? 4
     }
 }
 

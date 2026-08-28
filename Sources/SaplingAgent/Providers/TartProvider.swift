@@ -60,7 +60,9 @@ public struct TartProvider: JobProvider, Sendable {
 
         var setArgs = ["set", vmName]
         if let cpu = config.cpuCount { setArgs += ["--cpu", String(cpu)] }
-        if let memory = config.memoryGB { setArgs += ["--memory", String(memory * 1024)] }
+        if let memory = request.memoryGB ?? config.memoryGB {
+            setArgs += ["--memory", String(memory * 1024)]
+        }
         if setArgs.count > 2 {
             let setCommand = try await Self.tart(setArgs)
             try await ProcessRunner.runChecked(setCommand.executable, setCommand.arguments)

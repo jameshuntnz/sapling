@@ -60,6 +60,7 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
     var completedAt: Date?
     var exitReason: String?
     var imageRef: String?
+    var memoryGB: Int?
     var updatedAt: Date
     /// How many times this node has started the job, counting from one.
     ///
@@ -72,6 +73,7 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
     enum CodingKeys: String, CodingKey {
         case id, repo, platform, labels, status, name, attempts
         case imageRef = "image_ref"
+        case memoryGB = "memory_gb"
         case nodeId = "node_id"
         case workflowRunId = "workflow_run_id"
         case queuedAt = "queued_at"
@@ -95,6 +97,7 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
         completedAt = job.completedAt
         exitReason = job.exitReason
         imageRef = job.imageRef
+        memoryGB = job.memoryGB
         self.updatedAt = updatedAt
         self.attempts = attempts
     }
@@ -113,7 +116,8 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
             startedAt: startedAt,
             completedAt: completedAt,
             exitReason: exitReason,
-            imageRef: imageRef
+            imageRef: imageRef,
+            memoryGB: memoryGB
         )
     }
 

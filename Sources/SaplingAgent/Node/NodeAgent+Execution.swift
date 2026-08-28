@@ -80,7 +80,8 @@ extension NodeAgent {
                 cache: config.cache.enabled ? config.cache : nil,
                 bootTimeout: .seconds(config.macos.bootTimeoutSeconds),
                 jobTimeout: .seconds(
-                    job.platform == .macos ? config.macos.jobTimeoutSeconds : config.linux.jobTimeoutSeconds)
+                    job.platform == .macos ? config.macos.jobTimeoutSeconds : config.linux.jobTimeoutSeconds),
+                memoryGB: memoryGB(for: job)
             )
 
             let outcome: JobOutcome
