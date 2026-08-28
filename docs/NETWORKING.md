@@ -89,43 +89,55 @@ the failed `tart run` in seconds rather than minutes, so the broken state is
 never sat on; checks after every VM teardown whether anything else lost its
 network; and repairs the container network when it has.
 
-### The root cause is not known
+### The root cause
 
-Say it plainly, because several plausible stories have been wrong already.
+**Deleting a VM while the `tart run` process that owns it is still alive
+corrupts vmnet, and after a couple of those no VM can attach to a bridge
+again.**
 
-**Established:** a VM's `vmenet` interface is sometimes created and never
-attached to a bridge, while a container's attaches normally seconds later. The
-VM process is alive and healthy throughout; it simply has no network to ask for
-an address on. Tearing that VM down then destroys another guest's bridge.
+Demonstrated on the node, controlled, same session. Each round brings up a
+container and a VM, confirms both attached, then tears the VM down. The only
+variable is the teardown order.
 
-**Not established:** why the attach fails. Something about a node that has been
-up for hours, and nothing about concurrency.
+Deleting while the process is alive:
 
-Two theories were tested and discarded:
+```
+REP 1  PASS                       vmenet 2
+REP 2  PASS                       vmenet 3   <- leaked an interface
+REP 3  FAIL  VM cannot attach     vmenet 3
+REP 4-8 FAIL
+```
 
-- *"They fight over one bridge."* No. They get one each — `bridge100` for the
-  container, `bridge101` for the VM — and coexist in either start order.
-- *"Starting them at the same instant races."* No. On a freshly rebooted node,
-  a container and a VM started in the same instant both attached within three
-  seconds and the VM had an address in nine — three times out of three.
+Killing the process first, then deleting:
 
-What separates the failures from the successes is **uptime**, not what else is
-running. Every failure happened on a node up for hours; a rebooted node runs
-the same workload cleanly.
+```
+REP 1-8  PASS                     vmenet 2 throughout, no leak
+```
 
-The best remaining candidate is leaked `sudo tart run` wrappers, one per macOS
-job — but a node was observed with one leaked wrapper and zero leaked `vmenet`
-interfaces, which breaks the obvious version of that story. It is a candidate,
-not an answer.
+The container keeps working throughout the failing rounds — it holds
+`bridge101` and reaches the internet — while the VM gets nothing. That is
+exactly the production signature.
 
-Since it cannot be reproduced on demand, `NetworkDiagnostics` captures the
-host's full networking state the moment an attach fails, before teardown
-destroys the evidence. It is built to settle two specific hypotheses:
-`InternetSharing` wedging (it logs `waiting for
-mis_vmnet_interface_attached_callback` and, in the observed failure, never got
-it — if so, `launchctl kickstart -k system/com.apple.InternetSharing` is a
-seconds-long repair instead of a reboot), and `bootpd` lease exhaustion on a
-`/24` after a day of jobs.
+Why it happened at all: `ProcessRunner` cancellation calls
+`process.terminate()`, which signals its *immediate* child. The VM is launched
+as `launchctl asuser … sudo -u admin … tart run`, so terminating the child
+kills `launchctl` and leaves `sudo` and `tart` running, reparented to PID 1 —
+which is why leaked wrappers are found with PID 1 as their parent. Teardown
+then stopped and deleted the VM while that process still held its `vmenet`
+interface.
+
+This accounts for every observation:
+
+- A rebooted node works; one that has been up for hours does not. Each macOS
+  job did one bad teardown.
+- Containers survive and VMs do not.
+- The retry "just working" — a fresh VM can still attach until the corruption
+  accumulates past a threshold.
+- Why the harness could not reproduce it for 28 trials: `race.sh` happened to
+  `pkill` the process before deleting, which is the correct order.
+
+The fix is the ordering in `forceTeardown`: stop, then kill whatever is still
+running the VM, then delete.
 
 ### Why the retry matters more than the cause
 
@@ -392,8 +404,10 @@ watching.
   and a reproduction outside a real job has not been found.
 - Disk I/O contention between a 140GB VM clone and a container build on one
   SSD, which produces boot timeouts that look like network faults.
-- **The root cause.** Why a VM's interface fails to attach on a node that has
-  been up for hours. `NetworkDiagnostics` exists to answer this the next time
-  it happens; until then the retry makes it survivable rather than fatal.
-- Whether the leaked `tart run` wrappers are that cause, or merely another
-  symptom of the same thing.
+- Whether a corrupted vmnet can be repaired without a reboot. The controlled
+  run recovered as soon as teardowns were done correctly, which suggests it
+  can — but that was one observation, not a measurement.
+- Whether `ProcessRunner` should kill the whole process group rather than its
+  immediate child. The targeted kill by VM name works; the general problem —
+  that terminating a `launchctl asuser` child orphans everything beneath it —
+  applies to every command routed through `SessionCommand`.

@@ -28,12 +28,35 @@ extension TartProvider {
     /// booted can't be stopped, and one that was never cloned can't be
     /// deleted, but neither should stop us reclaiming the slot.
     static func forceTeardown(vmName: String) async {
-        for arguments in [["stop", "--timeout", "30", vmName], ["delete", vmName]] {
-            guard let command = try? await tart(arguments) else { return }
-            _ = try? await ProcessRunner.run(
-                command.executable, command.arguments, timeout: .seconds(60))
-        }
+        // Stop first, so the VM shuts down cleanly and `tart run` exits under
+        // its own power.
+        await tartCommand(["stop", "--timeout", "30", vmName])
+
+        // Then make sure it actually has. Cancelling the boot task does not:
+        // `ProcessRunner` terminates its immediate child, which is
+        // `launchctl`, and the `sudo` and `tart` processes beneath it survive
+        // — that is why leaked wrappers are found with PID 1 as their parent.
+        //
+        // This ordering is the point. Deleting a VM while the process running
+        // it is still alive, still holding its `vmenet` interface, is asking
+        // vmnet to lose track of an interface that is in use — and losing
+        // track of interfaces is exactly the fault under investigation. The
+        // kill used to happen *after* the delete.
         await killRunProcesses(forVM: vmName)
+
+        await tartCommand(["delete", vmName])
+    }
+
+    /// Run one `tart` subcommand, ignoring failure.
+    ///
+    /// A VM that never booted cannot be stopped and one that was never cloned
+    /// cannot be deleted, and neither should stop us reclaiming the slot — but
+    /// neither should it skip the steps after it, which an early `return`
+    /// used to do.
+    private static func tartCommand(_ arguments: [String]) async {
+        guard let command = try? await tart(arguments) else { return }
+        _ = try? await ProcessRunner.run(
+            command.executable, command.arguments, timeout: .seconds(60))
     }
 
     /// Kill whatever is still running this VM, which deleting it does not.

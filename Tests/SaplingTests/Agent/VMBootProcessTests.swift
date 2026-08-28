@@ -94,3 +94,49 @@ struct LeakedVMProcessTests {
         #expect(TartProvider.parsePIDs("0\n1\n").isEmpty)
     }
 }
+
+/// Teardown order, which is load-bearing.
+///
+/// Cancelling the boot task terminates `ProcessRunner`'s immediate child —
+/// `launchctl` — and the `sudo` and `tart` processes beneath it survive, which
+/// is why leaked wrappers are found parented to PID 1. Deleting a VM while the
+/// process running it is still alive, still holding its `vmenet` interface, is
+/// asking vmnet to lose track of an interface in use. Losing track of
+/// interfaces is the fault under investigation, and the kill used to happen
+/// after the delete.
+@Suite("VM teardown order")
+struct TeardownOrderTests {
+    static var source: String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/SaplingAgent/Providers/TartProvider+Teardown.swift")
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    @Test("the VM's process is killed before the VM is deleted")
+    func killPrecedesDelete() throws {
+        let source = Self.source
+        #expect(!source.isEmpty, "teardown source not found")
+        guard let kill = source.range(of: "killRunProcesses(forVM: vmName)"),
+            let delete = source.range(of: #"tartCommand(["delete", vmName])"#)
+        else {
+            Issue.record("teardown no longer kills the process or deletes the VM")
+            return
+        }
+        #expect(
+            kill.lowerBound < delete.lowerBound,
+            "deleting a VM whose process still holds its vmenet interface is the bug this order fixes")
+    }
+
+    @Test("a stop that fails does not skip the kill and the delete")
+    func failureDoesNotSkipLaterSteps() {
+        // Each step is its own call now; the loop with an early `return` meant
+        // one unavailable `tart` invocation silently skipped everything after.
+        #expect(Self.source.contains("private static func tartCommand"))
+        let earlyReturn = "guard let command = try? await tart(arguments) else { return }"
+        #expect(!Self.source.contains(earlyReturn + "\n            _ ="))
+    }
+}
