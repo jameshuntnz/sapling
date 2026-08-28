@@ -21,6 +21,13 @@ final class AppModel {
     var jobs: [Job] = []
     var selectedJobID: String?
     var selectedJobDetail: JobDetailResponse?
+    /// What the selected job's own VM or container is using.
+    ///
+    /// Fetched separately from the job's detail because it comes from a
+    /// different place — the agent sampling live processes rather than the
+    /// store — and a node too busy to answer for one should still answer for
+    /// the other.
+    var selectedJobResources: JobResourcesResponse?
     var lastUpdated: Date?
     /// Recent hardware samples, for the trend behind each meter.
     var metricsHistory: [NodeMetrics] = []
@@ -91,6 +98,8 @@ final class AppModel {
 
             if let selectedJobID {
                 self.selectedJobDetail = try? await client.job(id: selectedJobID)
+                self.selectedJobResources = try? await client.jobResources(
+                    jobID: selectedJobID, limit: 60)
             }
         } catch let error as ClientError {
             self.connection = .failed(error.message)
@@ -102,8 +111,12 @@ final class AppModel {
     func select(jobID: String?) {
         selectedJobID = jobID
         selectedJobDetail = nil
+        selectedJobResources = nil
         guard let jobID else { return }
-        Task { selectedJobDetail = try? await client.job(id: jobID) }
+        Task {
+            selectedJobDetail = try? await client.job(id: jobID)
+            selectedJobResources = try? await client.jobResources(jobID: jobID, limit: 60)
+        }
     }
 
     // MARK: - Control

@@ -5,7 +5,7 @@ import SaplingDB
 /// Running one job through a provider, and recording what happened.
 extension NodeAgent {
     func execute(_ job: Job) async {
-        let events = StoreEventSink(store: store, jobID: job.id)
+        let events = StoreEventSink(store: store, jobID: job.id, stats: jobStats)
         let runnerName =
             Self.runnerNamePrefix + job.platform.rawValue + "-"
             + String(UUID().uuidString.prefix(8)).lowercased()

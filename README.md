@@ -133,6 +133,7 @@ POST /api/v1/nodes/join-token     generate an enrollment token
 GET  /api/v1/jobs?status=&limit=  list jobs
 GET  /api/v1/jobs/:id             job detail
 GET  /api/v1/jobs/:id/logs?after= event log, tailable
+GET  /api/v1/jobs/:id/resources   that job's VM or container, against its limits
 POST /api/v1/drain                stop accepting new jobs
 POST /api/v1/cordon               pause acceptance
 POST /api/v1/uncordon             resume acceptance

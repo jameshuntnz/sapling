@@ -113,6 +113,19 @@ public struct SaplingClient: Sendable {
         return try await send("GET", path, as: LogsResponse.self)
     }
 
+    /// Fetches what one job's environment is using, against its limits.
+    ///
+    /// - Parameters:
+    ///   - jobID: The job to report on.
+    ///   - limit: Most recent N samples, or all held when `nil`.
+    /// - Returns: The job's figures, empty if it never had an environment.
+    /// - Throws: `ClientError` if the daemon is unreachable or has no such job.
+    public func jobResources(jobID: String, limit: Int? = nil) async throws -> JobResourcesResponse {
+        var path = "api/v1/jobs/\(jobID)/resources"
+        if let limit { path += "?limit=\(limit)" }
+        return try await send("GET", path, as: JobResourcesResponse.self)
+    }
+
     /// Fetches recent hardware samples for a chart.
     ///
     /// - Parameter limit: Most recent N samples, or all held when `nil`.

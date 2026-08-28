@@ -75,12 +75,26 @@ struct JobOutcome: Sendable {
 /// events as they happen (§5.1).
 protocol EventSink: Sendable {
     func record(_ event: String, detail: String?) async
+
+    /// Announce the environment this job now has, so it can be measured.
+    ///
+    /// Separate from the event log even though the name appears there too:
+    /// per-job CPU and memory are sampled from the host process behind the
+    /// environment, and finding that process starts with knowing its name.
+    ///
+    /// - Parameters:
+    ///   - name: The VM or container name.
+    ///   - platform: Which provider created it.
+    func environmentStarted(name: String, platform: JobPlatform) async
 }
 
 extension EventSink {
     func record(_ event: String) async {
         await record(event, detail: nil)
     }
+
+    /// Ignore the environment by default, for sinks that only collect events.
+    func environmentStarted(name: String, platform: JobPlatform) async {}
 
     /// Free-text log line, chunked so a single huge write doesn't become one
     /// unreadable row.

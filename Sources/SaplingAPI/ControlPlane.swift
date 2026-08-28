@@ -5,10 +5,15 @@ import SaplingDB
 
 /// Assembles the answers the REST API serves.
 ///
-/// Reads exclusively from the store — the agent writes state as it happens,
-/// and nothing here inspects live processes (§5.1). That keeps the API
-/// correct even while the agent is busy, and identical whether it's serving
-/// the CLI or the menu bar app.
+/// Reads from the store — the agent writes state as it happens, and nothing
+/// here inspects live processes (§5.1). That keeps the API correct even while
+/// the agent is busy, and identical whether it's serving the CLI or the menu
+/// bar app.
+///
+/// `jobResources` is the one exception, and is deliberate: what a job's own VM
+/// is using cannot be written down as it happens without a row every five
+/// seconds per job, so it is asked of the agent's sampler and is the only
+/// answer here that a node without a running agent cannot give.
 struct ControlPlane: Sendable {
     let store: SaplingStore
     let config: SaplingConfig
@@ -97,6 +102,25 @@ struct ControlPlane: Sendable {
         guard try await store.job(id: jobID) != nil else { return nil }
         let events = try await store.events(jobID: jobID, afterID: after)
         return LogsResponse(jobID: jobID, events: events)
+    }
+
+    /// What one job's own VM or container is using, against what it was given.
+    ///
+    /// Only the node running the job can answer this — the figures come from
+    /// the host process behind the environment and are not in the store, so
+    /// this is the one endpoint that reads from the agent rather than the
+    /// database. A job whose environment has gone still answers, with the
+    /// peaks it reached.
+    ///
+    /// - Parameters:
+    ///   - id: The job to report on.
+    ///   - limit: Most recent N samples, or all held when `nil`.
+    /// - Returns: The job's figures, or `nil` if there is no such job.
+    /// - Throws: If the store cannot be read.
+    func jobResources(id: String, limit: Int?) async throws -> JobResourcesResponse? {
+        guard let job = try await store.job(id: id) else { return nil }
+        guard let agent else { return JobResourcesResponse(jobID: id, platform: job.platform) }
+        return await agent.jobStats.resources(jobID: id, platform: job.platform, limit: limit)
     }
 
     func createJoinToken(controlPlaneURL: String) async throws -> JoinTokenResponse {

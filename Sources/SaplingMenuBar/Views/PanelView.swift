@@ -8,7 +8,9 @@ struct PanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let detail = model.selectedJobDetail {
-                JobDetailView(detail: detail) { model.select(jobID: nil) }
+                JobDetailView(detail: detail, resources: model.selectedJobResources) {
+                    model.select(jobID: nil)
+                }
             } else if showingSettings {
                 SettingsView(isPresented: $showingSettings)
             } else {

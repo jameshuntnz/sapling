@@ -92,6 +92,17 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
         return try jsonResponse(logs)
     }
 
+    v1.get("jobs", ":id", "resources") { request async throws -> Response in
+        guard let id = request.parameters.get("id") else {
+            return errorResponse(.badRequest, "missing_id", "no job id in path")
+        }
+        let limit = try? request.query.get(Int.self, at: "limit")
+        guard let resources = try await controlPlane.jobResources(id: id, limit: limit) else {
+            return errorResponse(.notFound, "not_found", "no job with id \(id)")
+        }
+        return try jsonResponse(resources)
+    }
+
     v1.get("metrics") { request async throws -> Response in
         let limit = try? request.query.get(Int.self, at: "limit")
         return try jsonResponse(await controlPlane.metricsHistory(limit: limit))

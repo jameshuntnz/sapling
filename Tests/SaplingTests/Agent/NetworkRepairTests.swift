@@ -18,7 +18,8 @@ struct NetworkRepairTests {
 
     static func container(_ id: String, _ address: String?, running: Bool = true) -> ContainerRecord {
         ContainerRecord(
-            id: id, state: running ? "running" : "stopped", address: address, gateway: nil)
+            id: id, state: running ? "running" : "stopped", address: address, gateway: nil,
+            cpus: nil, memoryBytes: nil)
     }
 
     @Test("a container still on a working bridge blocks the repair")

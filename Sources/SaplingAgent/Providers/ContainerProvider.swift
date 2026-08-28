@@ -89,6 +89,7 @@ struct ContainerProvider: JobProvider, Sendable {
         let runCommand = try await SessionCommand.invocation("container", args)
 
         await events.record(RunEventName.containerStarted, detail: "\(name) (\(image))")
+        await events.environmentStarted(name: name, platform: .linux)
 
         // The address the watchdog resolved, kept so a container that is killed
         // can still be asked why. Recreating the network SIGKILLs every

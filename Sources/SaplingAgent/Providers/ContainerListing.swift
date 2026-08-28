@@ -16,6 +16,13 @@ struct ContainerRecord: Sendable, Equatable {
     let address: String?
     /// The gateway the container will route through, if it reported one.
     let gateway: String?
+    /// Cores it was given, as `container` recorded them.
+    let cpus: Int?
+    /// Memory it was given, in bytes.
+    ///
+    /// Present whether or not Sapling asked for a size: an unsized container
+    /// gets Apple's default, and this reports that rather than nothing.
+    let memoryBytes: Int64?
 
     var isRunning: Bool { state == "running" }
 }
@@ -59,11 +66,14 @@ enum ContainerListing {
             let network = (status?["networks"] as? [[String: Any]])?.first
             let address = (network?["ipv4Address"] as? String)
                 .map { String($0.split(separator: "/")[0]) }
+            let resources = configuration?["resources"] as? [String: Any]
             return ContainerRecord(
                 id: id,
                 state: (status?["state"] as? String) ?? "unknown",
                 address: address,
-                gateway: network?["ipv4Gateway"] as? String
+                gateway: network?["ipv4Gateway"] as? String,
+                cpus: resources?["cpus"] as? Int,
+                memoryBytes: (resources?["memoryInBytes"] as? Int).map(Int64.init)
             )
         }
     }

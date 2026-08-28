@@ -74,9 +74,15 @@ public actor NodeAgent {
 
     /// Samples the hardware, so the UI can show what the node is doing.
     public let metrics = MetricsCollector()
+    /// Samples each running job's own VM or container, against its limits.
+    ///
+    /// The node-wide meters say the machine is under pressure; these say which
+    /// job is doing it.
+    public let jobStats = JobStatsCollector()
 
     var pollTask: Task<Void, Never>?
     var metricsTask: Task<Void, Never>?
+    var jobStatsTask: Task<Void, Never>?
     var housekeepingTask: Task<Void, Never>?
     var runningJobs: [String: Task<Void, Never>] = [:]
     /// Runner names minted for jobs that are still starting or running.
@@ -164,6 +170,7 @@ public actor NodeAgent {
 
         pollTask = Task { [weak self] in await self?.pollLoop() }
         metricsTask = Task { [weak self] in await self?.metrics.run() }
+        jobStatsTask = Task { [weak self] in await self?.jobStats.run() }
         housekeepingTask = Task { [weak self] in await self?.housekeepingLoop() }
         let watching = await watchedRepos()
         Log.info(
@@ -176,6 +183,7 @@ public actor NodeAgent {
     public func stop() async {
         pollTask?.cancel()
         metricsTask?.cancel()
+        jobStatsTask?.cancel()
         housekeepingTask?.cancel()
         for task in runningJobs.values { task.cancel() }
         runningJobs.removeAll()

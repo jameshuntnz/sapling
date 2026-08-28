@@ -8,6 +8,8 @@ import SwiftUI
 /// right now — and keeps working if the connection drops mid-job.
 struct JobDetailView: View {
     let detail: JobDetailResponse
+    /// What this job's environment is using, when the node is reporting it.
+    let resources: JobResourcesResponse?
     let onBack: () -> Void
 
     @State private var autoScroll = true
@@ -17,6 +19,12 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            if let resources, !resources.isEmpty {
+                Divider()
+                JobResourcesView(resources: resources)
+                    .padding(.horizontal, Metrics.horizontalPadding)
+                    .padding(.vertical, 9)
+            }
             Divider()
             log
         }

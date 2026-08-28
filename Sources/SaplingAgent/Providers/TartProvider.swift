@@ -68,6 +68,12 @@ public struct TartProvider: JobProvider, Sendable {
             try await ProcessRunner.runChecked(setCommand.executable, setCommand.arguments)
         }
 
+        // Announced before the VM starts, not after it is reachable: the
+        // sampler tolerates an environment whose process does not exist yet,
+        // and a VM that takes two minutes to boot is two minutes of a job
+        // where the panel would otherwise have nothing to show.
+        await events.environmentStarted(name: vmName, platform: .macos)
+
         // `tart run` blocks for the VM's lifetime, so it stays a background
         // task and gets cancelled during teardown. Everything it says goes to
         // `process`, because nothing awaits this task — see `VMBootProcess`

@@ -132,6 +132,29 @@ struct APITests {
         }
     }
 
+    /// A job with nothing sampled still answers.
+    ///
+    /// A node with no agent — every test server here, and a daemon serving the
+    /// API without running jobs — has nothing to report. An error would leave
+    /// the panel showing a connection problem for a job that simply has no VM.
+    @Test("reports a job's environment usage, empty when nothing was sampled")
+    func jobResources() async throws {
+        try await withServer { store, client in
+            try await store.saveJob(makeJob("1", platform: .linux, status: .running))
+
+            let resources = try await client.jobResources(jobID: "1")
+            #expect(resources.jobID == "1")
+            #expect(resources.platform == .linux)
+            #expect(resources.isEmpty)
+            #expect(resources.environment == nil)
+            #expect(!resources.isLive)
+
+            await #expect(throws: ClientError.self) {
+                try await client.jobResources(jobID: "nope")
+            }
+        }
+    }
+
     @Test("cordon and uncordon move the node's status")
     func control() async throws {
         try await withServer { store, client in
