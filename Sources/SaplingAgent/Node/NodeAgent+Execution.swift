@@ -208,34 +208,57 @@ extension NodeAgent {
     ///   - job: The job to ask about.
     ///   - attempts: How many times to ask before giving up.
     ///   - retryDelay: Gap between attempts.
+    ///   - grace: Extra time allowed while GitHub still reports the job *in
+    ///     progress*. Defaults to none when `retryDelay` is zero, so a test
+    ///     asking once still asks once.
     /// - Returns: What GitHub says became of the job.
     func remoteConclusion(
         for job: Job,
         attempts: Int? = nil,
-        retryDelay: Duration? = nil
+        retryDelay: Duration? = nil,
+        grace: Duration? = nil
     ) async -> RemoteConclusion {
         let attempts = attempts ?? conclusionAttempts
         let retryDelay = retryDelay ?? conclusionRetryDelay
+        let grace = grace ?? (retryDelay == .zero ? .zero : Self.inProgressGrace)
         guard let jobID = Int64(job.id) else { return .unknown }
 
+        let started = ContinuousClock.now
         var lastSeenQueued = false
-        for attempt in 0..<attempts {
+        var lastSeenRunning = false
+        var attempt = 0
+
+        while true {
             if attempt > 0 {
                 try? await Task.sleep(for: retryDelay)
             }
-            guard let remote = try? await github.job(repo: job.repo, jobID: jobID) else { continue }
-            guard remote.isCompleted else {
+            attempt += 1
+
+            if let remote = try? await github.job(repo: job.repo, jobID: jobID) {
+                if remote.isCompleted {
+                    switch remote.conclusion {
+                    case "success": return .success
+                    case let conclusion?: return .concluded(conclusion)
+                    case nil: return .unknown
+                    }
+                }
                 // Still waiting for a runner after our runner has exited means
-                // our runner ran something else. Not decided until the retries
-                // are done, in case GitHub is simply lagging.
+                // our runner ran something else. Still *running* means the
+                // opposite — GitHub has it, and simply hasn't finished with it.
                 lastSeenQueued = remote.isQueued
-                continue
+                lastSeenRunning = !remote.isQueued
             }
 
-            switch remote.conclusion {
-            case "success": return .success
-            case let conclusion?: return .concluded(conclusion)
-            case nil: return .unknown
+            if attempt >= attempts {
+                // The base attempts cover GitHub lagging a second or two behind
+                // a runner exiting. This covers something else: the runner has
+                // exited and the job is still finishing on GitHub's side, with
+                // post-steps and log upload to go. Fifteen seconds did not
+                // cover it — an iOS job GitHub concluded as `failure`, and a
+                // release that published successfully, were both recorded here
+                // as "runner exited without the job completing". Those are the
+                // failures that make a working node look broken.
+                guard lastSeenRunning, ContinuousClock.now - started < grace else { break }
             }
         }
         return lastSeenQueued ? .stillQueued : .unknown

@@ -58,17 +58,51 @@ while a container held `192.168.64.4`. That is the *aftermath*, not the
 mechanism: the container's bridge had already died on its own, freeing index
 100 for Tart to take. Tart stole nothing.
 
-What kills the container network is still unidentified. What is established:
+### What kills the container network
 
-- It dies while containers are still attached and still running.
+Caught in the act, sampling the host every two seconds during a real PR check:
+
+```
+11:42:05  bridges=[bridge100:192.168.64.1]   a container, working
+11:44:20  bridges=[]                          <- all of them, at once
+11:46:54  bridges=[bridge100:192.168.65.1]   the next VM, fresh bridge100
+```
+
+11:44:18 and 11:44:19 are `cleanup_started` and `cleanup_finished` for a macOS
+VM. **Tearing that VM down destroyed the bridge a running container was
+using**, and its job died mid-step after successfully compiling a module.
+
+It is not teardown as such. Measured directly, with a healthy VM and a healthy
+container side by side, `tart stop --timeout 30` followed by `tart delete` took
+only the VM's own `bridge101` and left the container on `bridge100` reaching
+the internet throughout — before, during and after.
+
+The difference is the state of the VM being torn down. The one that did the
+damage had failed: its `tart run` had exited seconds after starting, Tart still
+reported the VM as `running`, and no bridge for it had ever appeared. Sapling
+did not notice for five minutes — see below — and then tore it down blind.
+
+The precise vmnet mechanism remains unidentified, and a `kill -9` on `tart run`
+does not reproduce it (that leaves Tart's state `stopped`, not `running`). So
+the design does not claim to prevent it. It does three things instead: catches
+the failed `tart run` in seconds rather than minutes, so the broken state is
+never sat on; checks after every VM teardown whether anything else lost its
+network; and repairs the container network when it has.
+
+### What is established
+
+- The container network dies while containers are still attached and running.
 - It does not come back on its own, and starting new containers does not
   recreate it — they are handed addresses on the dead subnet.
 - `container system stop && container system start` restores it; nothing less
   does.
+- A normal VM teardown is safe. A teardown of a VM that failed to start is not.
 - A separate symptom, the VM that "never reported an IP address within 300s",
-  is **not** this fault. Its hang report shows 259 seconds inside `pwritev` —
-  the VM was starved of disk I/O while a container build ran, on a box with
-  one SSD. That is a capacity problem, not a network one.
+  has two distinct causes. One is the above — no `tart run`, so nothing to
+  DHCP from. The other is disk: a hang report for one such VM shows 259
+  seconds inside `pwritev`, starved of I/O while a container build ran on the
+  same single SSD. Neither is a network fault, and the message now says which
+  it was by reporting the host's bridges alongside it.
 
 ## The design
 
@@ -115,13 +149,38 @@ concluding anything — it must never be the thing that fails a job.
 ### 4. After the loss — repair
 
 `ContainerProvider.repairNetwork` recreates the container network, because
-that is the only thing that works. It is gated on being the last running
-container: a restart stops all of them, and killing a healthy concurrent job
-to repair a broken one is not a trade worth making. With `max_concurrent = 1`
-it is unconditional.
+that is the only thing that works.
+
+The guard is on **health, not presence**. A restart stops every container, so
+another container that is still reachable is a job running fine and must not
+be killed to repair someone else's network. One that is already orphaned has
+nothing left to lose. Presence alone was the wrong test: when a VM teardown
+takes the bridge, every container on it is orphaned at once, and refusing to
+repair because one of them exists leaves the node broken for the next job too.
+A container whose address cannot be determined counts as live — "we could not
+tell" is not grounds for killing someone's job.
+
+`NetworkAftercare.afterVMTeardown` runs this check after every VM teardown,
+successful or not, since the failing teardown is the one that did the damage.
 
 There is no equivalent for Tart. A VM whose network dies is torn down, and
 the next job clones a fresh one.
+
+### 5. The process that was never watched
+
+`tart run` is launched into a detached task and blocks for the VM's lifetime,
+so nothing awaits it. That made every way it can fail invisible: the task's own
+errors were swallowed, its exit status discarded, and only stderr read — so a
+`tart run` that printed its complaint on stdout and exited said nothing at all.
+
+Measured: the process started at 11:39:18.1 and was gone by 11:39:18.2.
+Sapling waited the full five-minute boot timeout, reported "VM never reported
+an IP address" — true, and not the cause — and then tore the VM down, which is
+what took the container's bridge with it.
+
+`VMBootProcess` collects both streams and the exit status, and `waitForIP`
+checks it every pass. A VM whose process has gone fails in seconds, carrying
+whatever `tart` actually said.
 
 ## The cache proxy
 
@@ -171,9 +230,32 @@ state that says so plainly and does not count as a problem.
 - **Verify against hardware.** Every claim in this document was measured on
   the node. The unit suite was green through every failure it describes.
 
+## Measured timings
+
+A healthy macOS VM, claim to running a job, on this node:
+
+| Phase | Elapsed |
+|---|---|
+| clone started | 1s |
+| clone + boot + DHCP, to `vm_booted` | 8s |
+| host bridge check | <1s |
+| SSH accepting | +4s |
+| egress proven | +1s |
+| runner registered and started | +1s |
+| GitHub assigns and the job runs | +9s |
+| **total** | **23s** |
+
+The 140GB clone is about a second — APFS copy-on-write. Nothing in the boot
+path is slow; the five-minute failures were all a broken `tart run` nobody was
+watching.
+
 ## Still open
 
-- What tears down the container network in the first place. The design
-  survives and repairs it; it does not prevent it.
-- Disk I/O contention between a VM clone and a container build, which produces
-  boot timeouts that look like network faults.
+- The vmnet mechanism by which tearing down a failed VM destroys another
+  network's bridge. The design detects and repairs it; it does not prevent it,
+  and a reproduction outside a real job has not been found.
+- Disk I/O contention between a 140GB VM clone and a container build on one
+  SSD, which produces boot timeouts that look like network faults.
+- Leaked `sudo … tart run` processes: three were found on the node, the oldest
+  over a day old, from daemons that died. Orphan reaping deletes leaked *VMs*,
+  and nothing reaps the processes.

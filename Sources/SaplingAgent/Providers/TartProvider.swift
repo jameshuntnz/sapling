@@ -60,9 +60,14 @@ public struct TartProvider: JobProvider, Sendable {
         do {
             let outcome = try await boot(vmName: vmName, request: request, events: events)
             await Self.teardown(vmName: vmName, events: events)
+            await NetworkAftercare.afterVMTeardown(events: events)
             return outcome
         } catch {
             await Self.teardown(vmName: vmName, events: events)
+            // Both paths, because the failing teardown is the one that did the
+            // damage: a VM that never booted properly took a running
+            // container's bridge with it when it was cleaned up.
+            await NetworkAftercare.afterVMTeardown(events: events)
             throw error
         }
     }
@@ -84,18 +89,34 @@ public struct TartProvider: JobProvider, Sendable {
         }
 
         // `tart run` blocks for the VM's lifetime, so it stays a background
-        // task and gets cancelled during teardown.
+        // task and gets cancelled during teardown. Everything it says goes to
+        // `process`, because nothing awaits this task — see `VMBootProcess`
+        // for the five minutes that cost.
+        let process = VMBootProcess()
         let bootTask = Task.detached {
-            let command = try await Self.tart(["run", "--no-graphics", vmName])
-            for try await chunk in ProcessRunner.stream(command.executable, command.arguments) {
-                if case .stderr(let text) = chunk, !text.isEmpty {
-                    await events.log("tart: \(text)")
+            do {
+                let command = try await Self.tart(["run", "--no-graphics", vmName])
+                for try await chunk in ProcessRunner.stream(command.executable, command.arguments) {
+                    switch chunk {
+                    // stdout as well as stderr: tart reports at least some
+                    // startup failures on stdout, and reading only stderr is
+                    // how the reason was lost.
+                    case .stdout(let text), .stderr(let text):
+                        guard !text.isEmpty else { continue }
+                        await events.log("tart: \(text)")
+                        await process.note(text)
+                    case .exit(let code):
+                        await process.end("`tart run` exited with status \(code)")
+                    }
                 }
+                await process.end("`tart run` ended without starting the VM")
+            } catch {
+                await process.end("`tart run` could not be started: \(error.localizedDescription)")
             }
         }
         defer { bootTask.cancel() }
 
-        let ip = try await waitForIP(vmName: vmName, timeout: request.bootTimeout)
+        let ip = try await waitForIP(vmName: vmName, timeout: request.bootTimeout, process: process)
         await events.record(RunEventName.vmBooted, detail: ip)
 
         // Asked of the host, before anything is asked of the guest: it costs

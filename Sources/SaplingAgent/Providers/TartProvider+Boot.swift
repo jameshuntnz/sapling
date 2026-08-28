@@ -62,9 +62,15 @@ extension TartProvider {
         await events.log("egress ok")
     }
 
-    func waitForIP(vmName: String, timeout: Duration) async throws -> String {
+    func waitForIP(vmName: String, timeout: Duration, process: VMBootProcess) async throws -> String {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
+            // Checked first, and every pass: a VM whose process has gone is
+            // never going to report an address, and waiting out five minutes
+            // to say so throws away the one message that named the cause.
+            if let explanation = await process.explanation(vmName: vmName) {
+                throw ProviderError(explanation)
+            }
             let command = try await Self.tart(["ip", vmName])
             let result = try await ProcessRunner.run(command.executable, command.arguments)
             let ip = result.trimmedOutput

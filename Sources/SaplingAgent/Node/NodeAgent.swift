@@ -61,6 +61,17 @@ public actor NodeAgent {
     static let defaultConclusionAttempts = 5
     static let defaultConclusionRetryDelay: Duration = .seconds(3)
 
+    /// How long to keep asking while GitHub still has the job *in progress*.
+    ///
+    /// The runner exiting is not the job ending: post-steps and log upload run
+    /// after it, and GitHub records the conclusion after those. Five attempts
+    /// three seconds apart gave that fifteen seconds, which was not enough —
+    /// jobs GitHub had concluded were filed here as "runner exited without the
+    /// job completing", inflating the node's failure count with work that had
+    /// in fact finished. Only spent when GitHub says the job is still going, so
+    /// a genuinely absent answer still costs fifteen seconds.
+    static let inProgressGrace: Duration = .seconds(180)
+
     /// Samples the hardware, so the UI can show what the node is doing.
     public let metrics = MetricsCollector()
 
