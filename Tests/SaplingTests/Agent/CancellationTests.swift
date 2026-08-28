@@ -50,6 +50,10 @@ struct CancellationTests {
     ) async throws -> T {
         let server = try await FakeGitHubServer.start(fixtures: fixtures)
         var config = SaplingConfig()
+        // Stated, not derived: these tests are about hand-off and
+        // cancellation, and must not pass or fail on how much RAM the
+        // machine running them happens to have.
+        config.node.memoryBudgetOverrideGB = 64
         config.node.name = "mini"
         config.github = server.githubConfig()
         config.github.repos = repos

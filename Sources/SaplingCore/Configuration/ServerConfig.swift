@@ -76,12 +76,25 @@ public struct NodeConfig: Codable, Sendable {
     /// less than one that is also somebody's desktop.
     public var memoryReserveGB: Int
 
+    /// Job memory budget in GB, stated outright instead of derived.
+    ///
+    /// Set this when the machine's total is the wrong basis: a node sharing the
+    /// host with something else, or a build agent whose RAM says nothing about
+    /// what it should hand to jobs. `nil` derives it from physical memory.
+    ///
+    /// It also keeps the scheduler testable. Deriving the budget from
+    /// `ProcessInfo.physicalMemory` made admission a property of whichever
+    /// machine ran the suite — green on a 32GB laptop, red in a 6GB CI VM,
+    /// with the code identical.
+    public var memoryBudgetOverrideGB: Int?
+
     /// Memory available to jobs on a machine of this size, in GB.
     ///
     /// - Parameter totalGB: The machine's physical memory.
     /// - Returns: What jobs may collectively hold, never negative.
     public func memoryBudgetGB(totalGB: Int) -> Int {
-        max(0, totalGB - memoryReserveGB)
+        if let memoryBudgetOverrideGB { return max(0, memoryBudgetOverrideGB) }
+        return max(0, totalGB - memoryReserveGB)
     }
 
     /// Jobs this node will run at once, after clamping.
@@ -98,6 +111,7 @@ public struct NodeConfig: Codable, Sendable {
         case serializePlatforms = "serialize_platforms"
         case maxConcurrent = "max_concurrent"
         case memoryReserveGB = "memory_reserve_gb"
+        case memoryBudgetOverrideGB = "memory_budget_gb"
     }
 
     /// Creates a server configuration.
@@ -105,12 +119,14 @@ public struct NodeConfig: Codable, Sendable {
         name: String = Host.current().localizedName ?? "sapling-node",
         serializePlatforms: Bool = false,
         maxConcurrent: Int? = nil,
-        memoryReserveGB: Int = 4
+        memoryReserveGB: Int = 4,
+        memoryBudgetOverrideGB: Int? = nil
     ) {
         self.name = name
         self.serializePlatforms = serializePlatforms
         self.maxConcurrent = maxConcurrent
         self.memoryReserveGB = memoryReserveGB
+        self.memoryBudgetOverrideGB = memoryBudgetOverrideGB
     }
 
     /// Creates a server configuration.
@@ -123,6 +139,7 @@ public struct NodeConfig: Codable, Sendable {
         serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? false
         maxConcurrent = try c.decodeIfPresent(Int.self, forKey: .maxConcurrent)
         memoryReserveGB = try c.decodeIfPresent(Int.self, forKey: .memoryReserveGB) ?? 4
+        memoryBudgetOverrideGB = try c.decodeIfPresent(Int.self, forKey: .memoryBudgetOverrideGB)
     }
 }
 

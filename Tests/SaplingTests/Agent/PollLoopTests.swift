@@ -25,6 +25,9 @@ struct PollLoopTests {
         let server = try await FakeGitHubServer.start(fixtures: fixtures)
 
         var config = SaplingConfig()
+        // Stated, not derived: dispatch must not depend on how much RAM
+        // the machine running the suite happens to have.
+        config.node.memoryBudgetOverrideGB = 64
         config.node.name = "mini"
         config.github = server.githubConfig()
         config.macos.labels = labels.macos
@@ -133,6 +136,9 @@ struct JobConclusionTests {
         let server = try await FakeGitHubServer.start(fixtures: fixtures)
 
         var config = SaplingConfig()
+        // Stated, not derived: dispatch must not depend on how much RAM
+        // the machine running the suite happens to have.
+        config.node.memoryBudgetOverrideGB = 64
         config.node.name = "mini"
         config.github = server.githubConfig()
 

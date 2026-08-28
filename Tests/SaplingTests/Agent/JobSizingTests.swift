@@ -151,4 +151,31 @@ struct JobSizingTests {
         // negative number the arithmetic would then admit against.
         #expect(node.memoryBudgetGB(totalGB: 2) == 0)
     }
+
+    /// An override states the budget instead of deriving it.
+    ///
+    /// Deriving it from the host made admission a property of whichever machine
+    /// ran the code — green on a 32GB laptop, red in a 6GB CI VM, with the
+    /// source identical.
+    @Test("an explicit budget ignores the machine entirely")
+    func budgetOverride() {
+        var node = NodeConfig()
+        node.memoryReserveGB = 4
+        node.memoryBudgetOverrideGB = 24
+        #expect(node.memoryBudgetGB(totalGB: 16) == 24)
+        #expect(node.memoryBudgetGB(totalGB: 6) == 24)
+        #expect(node.memoryBudgetGB(totalGB: 512) == 24)
+    }
+
+    /// The environment CI actually runs in: a 6GB VM keeping 4GB for the host.
+    @Test("a small machine still admits a job that fits its budget")
+    func smallMachine() {
+        var node = NodeConfig()
+        node.memoryReserveGB = 4
+        let budget = node.memoryBudgetGB(totalGB: 6)
+        #expect(budget == 2)
+        #expect(JobSizing.fits(memoryGB: 2, committedGB: 0, budgetGB: budget))
+        // And refuses, rather than silently queueing, what it cannot hold.
+        #expect(JobSizing.unschedulableReason(memoryGB: 8, budgetGB: budget, ceilingGB: nil) != nil)
+    }
 }
