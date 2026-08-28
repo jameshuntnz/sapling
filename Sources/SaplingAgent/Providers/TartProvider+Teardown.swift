@@ -70,14 +70,37 @@ extension TartProvider {
     /// `sudo` wrapper and the `tart` process under it. It excludes itself, and
     /// the daemon's own command line cannot contain the pattern.
     private static func kill(matching pattern: String) async {
+        let first = await pids(matching: pattern)
+        guard !first.isEmpty else { return }
+        for pid in first { Foundation.kill(pid, SIGTERM) }
+
+        // SIGTERM alone does not clear these. `sudo` forwards it to the command
+        // it is running rather than acting on it, and the command is exactly
+        // what has already gone — so the wrapper sits there. Measured on the
+        // node: a leaked wrapper survived the daemon's SIGTERM and was still
+        // running afterwards. There is nothing left to shut down gracefully,
+        // the VM having already been stopped and deleted, so whatever is still
+        // there after a moment gets SIGKILL.
+        try? await Task.sleep(for: .seconds(2))
+        let survivors = await pids(matching: pattern)
+        for pid in survivors { Foundation.kill(pid, SIGKILL) }
+
+        Log.info(
+            "reaped \(first.count) leaked `tart run` process(es)"
+                + (survivors.isEmpty ? "" : ", \(survivors.count) of which needed SIGKILL"))
+    }
+
+    /// Process ids whose command line contains `pattern`.
+    ///
+    /// `pgrep` exits non-zero when nothing matched, which is the common case
+    /// and not an error.
+    private static func pids(matching pattern: String) async -> [pid_t] {
         guard let found = try? await ProcessRunner.run("pgrep", ["-f", pattern], timeout: .seconds(20)),
             found.succeeded
         else {
-            return  // pgrep exits non-zero when nothing matched, which is the common case.
+            return []
         }
-        for pid in parsePIDs(found.stdout) {
-            Foundation.kill(pid, SIGTERM)
-        }
+        return parsePIDs(found.stdout)
     }
 
     /// Split from the call so the parsing is exercised: a mis-parse here sends
