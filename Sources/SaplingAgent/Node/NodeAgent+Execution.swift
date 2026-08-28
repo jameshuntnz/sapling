@@ -50,6 +50,11 @@ extension NodeAgent {
             if let selector = RunnerImageSelector.split(job.labels).image {
                 labels.append(RunnerImageSelector.labelPrefix + selector)
             }
+            // Recorded before the runner exists, so housekeeping can never
+            // sweep it during the seconds between minting and connecting.
+            inFlightRunners.insert(runnerName)
+            defer { inFlightRunners.remove(runnerName) }
+
             let jitConfig = try await github.jitConfig(
                 repo: job.repo,
                 runnerName: runnerName,

@@ -48,7 +48,15 @@ public actor CacheProxySupervisor {
             if !gateways.isEmpty { announced = false }
 
             for gone in listeners.keys where !gateways.contains(gone) {
-                listeners.removeValue(forKey: gone)?.cancel()
+                guard let listener = listeners.removeValue(forKey: gone) else { continue }
+                listener.cancel()
+                // Waited for, not just cancelled. Vapor's shutdown is
+                // asynchronous, so cancelling and moving on left the socket
+                // open — and when the same bridge came back, which is the
+                // normal case for a gateway address, the replacement listener
+                // failed to bind with "Address already in use". That happened
+                // three times in one afternoon.
+                await settle(listener)
                 Log.info("cache proxy stopped listening on \(gone) — its bridge went away")
             }
             for gateway in gateways where listeners[gateway] == nil {
@@ -74,6 +82,21 @@ public actor CacheProxySupervisor {
             } catch {
                 Log.warn("cache proxy on \(gateway) stopped: \(error.localizedDescription)")
             }
+        }
+    }
+
+    /// Wait for a cancelled listener to actually let go of its port.
+    ///
+    /// Bounded, because a shutdown that hangs must not stall the supervisor
+    /// for every other gateway. If it overruns, the next poll finds the
+    /// gateway without a listener and tries again — which is the same
+    /// recovery a failed bind gets.
+    private func settle(_ listener: Task<Void, Never>) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await listener.value }
+            group.addTask { try? await Task.sleep(for: .seconds(10)) }
+            await group.next()
+            group.cancelAll()
         }
     }
 

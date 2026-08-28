@@ -17,7 +17,8 @@ extension NodeAgent {
             }
             for repo in await watchedRepos() {
                 if let count = try? await github.pruneOfflineRunners(
-                    repo: repo, namePrefix: Self.runnerNamePrefix), count > 0
+                    repo: repo, namePrefix: Self.runnerNamePrefix, inFlight: inFlightRunners),
+                    count > 0
                 {
                     Log.info("removed \(count) stale runner registration(s) from \(repo)")
                 }

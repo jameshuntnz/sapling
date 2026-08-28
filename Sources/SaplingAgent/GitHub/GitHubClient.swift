@@ -240,12 +240,29 @@ actor GitHubClient {
 
     /// Ephemeral runners normally remove themselves.
     ///
-    /// Ones left behind by a crashed VM don't, and they accumulate in the repo's
-    /// runner list, so sweep anything offline that we clearly created.
+    /// Ones left behind by a crashed VM don't, and they accumulate in the
+    /// repo's runner list, so sweep anything offline that we clearly created.
+    ///
+    /// - Parameters:
+    ///   - repo: The repository to sweep.
+    ///   - namePrefix: Only runners named with this prefix are ours to delete.
+    ///   - inFlight: Runner names this node has just minted and is still
+    ///     starting. They have to be spared: a JIT runner that has been created
+    ///     but has not connected yet is `offline` and not `busy`, which is
+    ///     indistinguishable from a leaked one. Deleting it kills the job — the
+    ///     runner gets as far as "Connected to GitHub" and then fails with "the
+    ///     runner registration has been deleted from the server". Measured on
+    ///     the node: minted at 19:20:39, deleted by this sweep at 19:20:40,
+    ///     dead at 19:20:43.
+    /// - Returns: How many stale registrations were removed.
+    /// - Throws: If the repository's runner list cannot be read.
     @discardableResult
-    func pruneOfflineRunners(repo: String, namePrefix: String) async throws -> Int {
+    func pruneOfflineRunners(
+        repo: String, namePrefix: String, inFlight: Set<String> = []
+    ) async throws -> Int {
         let stale = try await runners(repo: repo).filter {
             $0.name.hasPrefix(namePrefix) && $0.status == "offline" && !$0.busy
+                && !inFlight.contains($0.name)
         }
         for runner in stale {
             try? await deleteRunner(repo: repo, runnerID: runner.id)

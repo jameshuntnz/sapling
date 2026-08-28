@@ -79,6 +79,13 @@ public actor NodeAgent {
     var metricsTask: Task<Void, Never>?
     var housekeepingTask: Task<Void, Never>?
     var runningJobs: [String: Task<Void, Never>] = [:]
+    /// Runner names minted for jobs that are still starting or running.
+    ///
+    /// Housekeeping sweeps offline runners to clear ones a crashed VM left
+    /// behind, and a JIT runner that has been created but has not connected
+    /// yet looks exactly like one of those. Without this it deleted runners it
+    /// had minted seconds earlier.
+    var inFlightRunners: Set<String> = []
     var networkGuardApplied = false
 
     /// Creates an agent for the given configuration and store.
