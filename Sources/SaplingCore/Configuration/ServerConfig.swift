@@ -33,11 +33,39 @@ public struct NodeConfig: Codable, Sendable {
     /// Human-readable node name, also the basis of its stable id.
     public var name: String
 
-    enum CodingKeys: String, CodingKey { case name }
+    /// Run one platform at a time, whatever the per-platform slot counts say.
+    ///
+    /// On by default, because the concurrency it gives up is not concurrency
+    /// this node has. Measured three times: a macOS VM and an Apple
+    /// `container` start together, the VM's vmnet interface is created and
+    /// never attached to a bridge, the VM times out after five minutes, and
+    /// its teardown then destroys the bridge the container is using — killing
+    /// the Linux job. Sapling requeues the macOS job, which now runs alone and
+    /// boots in eight seconds.
+    ///
+    /// That is the "fails once, then works on the retry with no intervention"
+    /// pattern, and the retry works *because* the first attempt's failure
+    /// killed the other job. So the node already serialises; it just does it
+    /// by destroying one job and spending five minutes on it. Doing it
+    /// deliberately keeps both jobs and loses nothing real.
+    ///
+    /// Turn it off to test whether concurrency has started working — on a node
+    /// with no leaked `tart run` processes, which is the state that appears to
+    /// break vmnet attachment. See docs/NETWORKING.md.
+    public var serializePlatforms: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case serializePlatforms = "serialize_platforms"
+    }
 
     /// Creates a server configuration.
-    public init(name: String = Host.current().localizedName ?? "sapling-node") {
+    public init(
+        name: String = Host.current().localizedName ?? "sapling-node",
+        serializePlatforms: Bool = true
+    ) {
         self.name = name
+        self.serializePlatforms = serializePlatforms
     }
 
     /// Creates a server configuration.
@@ -47,6 +75,7 @@ public struct NodeConfig: Codable, Sendable {
             try c.decodeIfPresent(String.self, forKey: .name)
             ?? Host.current().localizedName
             ?? "sapling-node"
+        serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? true
     }
 }
 

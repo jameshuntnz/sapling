@@ -131,9 +131,22 @@ extension NodeAgent {
         for job in queued {
             let used = inUse[job.platform] ?? 0
             guard used < capacity(for: job.platform) else { continue }
+            guard !blockedByOtherPlatform(job.platform, inUse: inUse) else { continue }
             inUse[job.platform] = used + 1
             await dispatch(job)
         }
+    }
+
+    /// Whether the other platform is busy and this node runs one at a time.
+    ///
+    /// The two platforms share vmnet, and on this hardware they do not share
+    /// it well: started together, the VM never gets a bridge, times out, and
+    /// its teardown destroys the container's. Holding the job back costs a few
+    /// minutes; dispatching it costs the other job outright. See
+    /// `NodeConfig.serializePlatforms` for the measurements.
+    func blockedByOtherPlatform(_ platform: JobPlatform, inUse: [JobPlatform: Int]) -> Bool {
+        guard config.node.serializePlatforms else { return false }
+        return inUse.contains { $0.key != platform && $0.value > 0 }
     }
 
     func dispatch(_ job: Job) async {

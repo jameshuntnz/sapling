@@ -95,3 +95,17 @@ extension ContainerProvider {
         }
     }
 }
+
+/// The address a running container was seen to hold.
+///
+/// Written once by the network watchdog and read after the container has gone,
+/// which is exactly when `container list` can no longer tell you.
+actor ObservedAddress {
+    /// The address, or `nil` if none was ever resolved.
+    private(set) var value: String?
+
+    /// Record the address.
+    func set(_ address: String?) {
+        value = address
+    }
+}

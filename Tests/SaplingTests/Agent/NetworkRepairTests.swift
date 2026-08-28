@@ -71,3 +71,35 @@ struct NetworkRepairTests {
         #expect(ContainerProvider.liveBystanders(among: [], bridges: [], sparing: nil).isEmpty)
     }
 }
+
+/// A container killed while its network was already gone was killed *by* the
+/// network going, whatever signal actually reached it.
+///
+/// Recreating the container network SIGKILLs everything on it, so the repair
+/// for one job's lost bridge lands before the watchdog has finished confirming
+/// it for another. The job then carried "container exited with status 137",
+/// which names the signal and not the cause.
+@Suite("Killed container diagnosis")
+struct KilledContainerTests {
+    @Test("an address with no bridge behind it explains the kill")
+    func orphanedAddressExplainsKill() {
+        let reachability = JobNetwork.reachability(of: "192.168.64.10", in: [])
+        #expect(reachability == .orphaned(address: "192.168.64.10"))
+        let reason = JobNetwork.lossReason(address: "192.168.64.10")
+        #expect(reason.contains("192.168.64.10"))
+        #expect(!reason.contains("137"))
+    }
+
+    /// A container that failed on its own, with its network intact, keeps its
+    /// own exit status — this must not relabel ordinary build failures.
+    @Test("a working network leaves the exit status alone")
+    func healthyNetworkIsNotRelabelled() {
+        let bridges = [
+            HostBridge(
+                name: "bridge100", address: "192.168.64.1", subnet: "192.168.64.0/24", prefix: 24)
+        ]
+        #expect(
+            JobNetwork.reachability(of: "192.168.64.10", in: bridges)
+                == .live(gateway: "192.168.64.1"))
+    }
+}

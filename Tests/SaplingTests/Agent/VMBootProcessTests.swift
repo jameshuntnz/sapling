@@ -66,3 +66,31 @@ struct VMBootProcessTests {
         #expect((explanation?.count ?? 0) < 1000)
     }
 }
+
+/// Deleting a VM does not stop the process that was running it.
+///
+/// `tart run` goes through `launchctl asuser … sudo -u admin … tart run`, and
+/// cancelling the task terminates only `ProcessRunner`'s immediate child. Six
+/// leaked wrappers were found on the node, the oldest a day and nine hours,
+/// one added by every macOS job — each apparently holding a `vmenet`
+/// interface that is never released.
+@Suite("Leaked VM processes")
+struct LeakedVMProcessTests {
+    @Test("reads process ids out of pgrep's output")
+    func parsesPIDs() {
+        #expect(TartProvider.parsePIDs("15335\n18498\n19474\n") == [15335, 18498, 19474])
+        #expect(TartProvider.parsePIDs("  38478  \n") == [38478])
+    }
+
+    /// A signal sent to a mis-parsed id goes to whatever holds it.
+    ///
+    /// Anything that is not a plain number is not a process.
+    @Test("ignores anything that is not a process id")
+    func ignoresGarbage() {
+        #expect(TartProvider.parsePIDs("").isEmpty)
+        #expect(TartProvider.parsePIDs("no such process\n").isEmpty)
+        #expect(TartProvider.parsePIDs("12ab\n-5\n").isEmpty)
+        // 1 is launchd, and 0 is every process in the group.
+        #expect(TartProvider.parsePIDs("0\n1\n").isEmpty)
+    }
+}

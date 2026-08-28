@@ -33,9 +33,68 @@ extension TartProvider {
             _ = try? await ProcessRunner.run(
                 command.executable, command.arguments, timeout: .seconds(60))
         }
+        await killRunProcesses(forVM: vmName)
+    }
+
+    /// Kill whatever is still running this VM, which deleting it does not.
+    ///
+    /// `tart run` is launched as `launchctl asuser … sudo -u admin … tart run`.
+    /// Cancelling the task terminates `ProcessRunner`'s immediate child —
+    /// `launchctl` — and the `sudo` and `tart` processes beneath it survive,
+    /// reparented to PID 1. Found on the node: six of them, the oldest a day
+    /// and nine hours, one added by every macOS job, each apparently holding a
+    /// `vmenet` interface that is never released. A node accumulating those
+    /// stops being able to attach a VM to a bridge at all, which is the fault
+    /// underneath most of this.
+    ///
+    /// They are root-owned, so only the daemon can clear them — `admin` gets
+    /// "operation not permitted".
+    static func killRunProcesses(forVM vmName: String) async {
+        // Refuse an empty or suspiciously short name rather than build a
+        // pattern that matches every VM on the machine, including live ones.
+        guard vmName.hasPrefix(vmPrefix) else { return }
+        await kill(matching: "tart run --no-graphics \(vmName)")
+    }
+
+    /// Kill every leaked `tart run` for a job VM, whatever its name.
+    ///
+    /// Startup only: the daemon has just come up, so nothing it owns is
+    /// legitimately running, and anything matching belongs to a previous life.
+    static func reapRunProcesses() async {
+        await kill(matching: "tart run --no-graphics \(vmPrefix)")
+    }
+
+    /// Send SIGTERM to every process whose command line contains `pattern`.
+    ///
+    /// `pgrep -f` matches the whole command line, which is what finds both the
+    /// `sudo` wrapper and the `tart` process under it. It excludes itself, and
+    /// the daemon's own command line cannot contain the pattern.
+    private static func kill(matching pattern: String) async {
+        guard let found = try? await ProcessRunner.run("pgrep", ["-f", pattern], timeout: .seconds(20)),
+            found.succeeded
+        else {
+            return  // pgrep exits non-zero when nothing matched, which is the common case.
+        }
+        for pid in parsePIDs(found.stdout) {
+            Foundation.kill(pid, SIGTERM)
+        }
+    }
+
+    /// Split from the call so the parsing is exercised: a mis-parse here sends
+    /// a signal to a process id nobody meant.
+    static func parsePIDs(_ output: String) -> [pid_t] {
+        output
+            .split(whereSeparator: \.isNewline)
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+            .filter { $0 > 1 }
     }
 
     func reapOrphans() async -> [String] {
+        // Processes first: a leaked `tart run` outlives the VM it was running,
+        // so reaping only the VMs left the process — and its vmnet interface —
+        // behind on every daemon restart.
+        await Self.reapRunProcesses()
+
         guard let command = try? await Self.tart(["list", "--format", "json"]),
             let result = try? await ProcessRunner.run(command.executable, command.arguments),
             result.succeeded,

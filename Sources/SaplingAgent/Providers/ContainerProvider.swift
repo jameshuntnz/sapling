@@ -111,6 +111,12 @@ struct ContainerProvider: JobProvider, Sendable {
 
         await events.record(RunEventName.containerStarted, detail: "\(name) (\(image))")
 
+        // The address the watchdog resolved, kept so a container that is killed
+        // can still be asked why. Recreating the network SIGKILLs every
+        // container on it, and the job then exits 137 — which describes the
+        // signal and not the reason it was sent.
+        let observed = ObservedAddress()
+
         let exitCode = try await withThrowingTaskGroup(of: Int32?.self) { group in
             group.addTask {
                 var status: Int32 = -1
@@ -135,6 +141,7 @@ struct ContainerProvider: JobProvider, Sendable {
             // quiet — its bridge had gone, which nothing was watching for.
             group.addTask {
                 let address = await Self.address(ofContainer: name, within: Self.addressTimeout)
+                await observed.set(address)
                 throw JobNetworkLost(reason: try await JobNetwork.awaitLoss(of: address))
             }
 
@@ -144,6 +151,18 @@ struct ContainerProvider: JobProvider, Sendable {
                 throw ProviderError("job exceeded its timeout of \(request.jobTimeout) and was terminated")
             }
             return code
+        }
+
+        // A container that died with its network already gone was killed by the
+        // network going, whatever signal actually reached it. Recreating the
+        // container network SIGKILLs everything on it, so the repair for one
+        // job's lost bridge arrives before the watchdog has finished confirming
+        // it for another — and the job then carries "container exited with
+        // status 137", which names the signal and not the cause.
+        if exitCode != 0, let address = await observed.value,
+            case .orphaned = await JobNetwork.reachability(of: address)
+        {
+            throw JobNetworkLost(reason: JobNetwork.lossReason(address: address))
         }
 
         if EgressCheck.isEgressFailure(exitCode) {

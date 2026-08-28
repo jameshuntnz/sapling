@@ -89,6 +89,55 @@ the failed `tart run` in seconds rather than minutes, so the broken state is
 never sat on; checks after every VM teardown whether anything else lost its
 network; and repairs the container network when it has.
 
+### Why one platform at a time
+
+The failure needs a container and a VM running together, and that is exactly
+what a wayfairer PR check does — android in a container, ios in a VM, in
+parallel. Sapling's own CI is macOS-only, which is why the node looked healthy
+whenever it was building itself.
+
+| Job | Container running too? | Result |
+|---|---|---|
+| wayfairer iOS 22:13 | yes | no IP, 300s timeout |
+| wayfairer iOS 22:31 | yes | no IP, 300s timeout |
+| wayfairer iOS 15:48 | yes | no IP, 300s timeout |
+| sapling check / release | no | success |
+| wayfairer iOS 15:56 | no | booted in 8s |
+
+Inspected while it was stuck: `bridge100` had exactly one member, `vmenet6`,
+the container. The VM's `vmenet5` had been created and never attached to any
+bridge. The VM process itself was alive and healthy the whole time — it simply
+had no network to ask for an address on.
+
+This also explains the "fails once, then works on the retry with no
+intervention" pattern. The retry does not win a race. The first attempt's
+timeout triggers a teardown, that teardown destroys the container's bridge and
+kills the Linux job, and the requeued macOS job then runs **alone** and boots
+in eight seconds. The node already serialises — by destroying one job and
+spending five minutes doing it.
+
+So `node.serialize_platforms` defaults to on. It gives up no concurrency this
+node actually has, and it keeps both jobs. Turn it off to test whether
+concurrency has started working, on a node with no leaked `tart run`
+processes.
+
+### The leak underneath it
+
+`tart run` is launched as `launchctl asuser … sudo -u admin … tart run`.
+Cancelling the task terminates `ProcessRunner`'s immediate child — `launchctl`
+— and the `sudo` and `tart` processes beneath it survive, reparented to PID 1.
+Deleting the VM does not touch them.
+
+Found on the node: six leaked wrappers, the oldest a day and nine hours old,
+one added by every macOS job, alongside six leaked `vmenet` interfaces. A node
+accumulating those appears to stop being able to attach a VM to a bridge at
+all, which is the most likely reason a VM and a container coexisted happily in
+a hand-run experiment earlier in the day and could not two hours later.
+
+They are root-owned, so only the daemon can clear them — `admin` gets
+"operation not permitted". Teardown now kills them by name, and startup reaps
+any left by a previous life.
+
 ### What is established
 
 - The container network dies while containers are still attached and running.
@@ -256,6 +305,7 @@ watching.
   and a reproduction outside a real job has not been found.
 - Disk I/O contention between a 140GB VM clone and a container build on one
   SSD, which produces boot timeouts that look like network faults.
-- Leaked `sudo … tart run` processes: three were found on the node, the oldest
-  over a day old, from daemons that died. Orphan reaping deletes leaked *VMs*,
-  and nothing reaps the processes.
+- Whether a clean node — no leaked processes, no leaked `vmenet` interfaces —
+  can actually run a VM and a container at once. If it can,
+  `node.serialize_platforms` can go back off. Until someone has measured that
+  on a rebooted node, concurrency is the thing to prove rather than assume.
