@@ -42,7 +42,7 @@ struct Serve: AsyncParsableCommand {
 
         try SaplingPaths.ensureHomeDirectory()
         let store = try SaplingStore(path: SaplingPaths.databaseFile)
-        let agent = NodeAgent(config: configuration, store: store)
+        let agent = NodeAgent(config: configuration, store: store, configURL: configURL)
 
         do {
             try await agent.start()
@@ -99,6 +99,26 @@ struct Serve: AsyncParsableCommand {
             source.resume()
             Self.signalSources.append(source)
         }
+
+        // SIGHUP is what a daemon is expected to answer, and it is the one
+        // route to a reload that needs neither the API nor the CLI —
+        // `sudo killall -HUP sapling` works from a node whose control plane
+        // is exactly what the edit is trying to fix.
+        signal(SIGHUP, SIG_IGN)
+        let hangup = DispatchSource.makeSignalSource(signal: SIGHUP, queue: .main)
+        hangup.setEventHandler {
+            Task {
+                Log.info("SIGHUP — re-reading the config file")
+                let result = await agent.reloadConfig()
+                if let error = result.error {
+                    Log.error("config reload failed: \(error)")
+                } else {
+                    Log.info("config reload: \(result.message)")
+                }
+            }
+        }
+        hangup.resume()
+        Self.signalSources.append(hangup)
     }
 
     /// Signal sources are cancelled when deallocated, so they have to outlive

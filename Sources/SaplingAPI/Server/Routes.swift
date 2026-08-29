@@ -108,6 +108,17 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
         return try jsonResponse(await controlPlane.metricsHistory(limit: limit))
     }
 
+    v1.get("config") { _ async throws -> Response in
+        try jsonResponse(try await controlPlane.configuration())
+    }
+
+    v1.post("config", "reload") { _ async throws -> Response in
+        // A rejected file answers 200 with the reason in the body, like the
+        // update endpoints: a config with a typo in it is an answer, not a
+        // server fault, and the CLI prints the reason either way.
+        try jsonResponse(await controlPlane.reloadConfig())
+    }
+
     v1.get("update") { _ async throws -> Response in
         try jsonResponse(await controlPlane.checkForUpdate())
     }

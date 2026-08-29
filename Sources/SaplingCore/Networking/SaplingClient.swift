@@ -157,6 +157,29 @@ public struct SaplingClient: Sendable {
         try await send("POST", "api/v1/update?force=\(force)", as: UpdateApplyResponse.self)
     }
 
+    /// Fetches the configuration the daemon is running with.
+    ///
+    /// Credentials are never included — the daemon reports them as set or
+    /// unset and nothing more.
+    ///
+    /// - Returns: The effective values, plus any edits waiting in the file.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func configuration() async throws -> ConfigResponse {
+        try await send("GET", "api/v1/config", as: ConfigResponse.self)
+    }
+
+    /// Tells the daemon to re-read its config file.
+    ///
+    /// Fields the daemon consumed once — the listener, the providers, the
+    /// GitHub credentials — are reported rather than applied, so a reload
+    /// never leaves the running node half-changed.
+    ///
+    /// - Returns: What was applied, and what still needs a restart.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func reloadConfig() async throws -> ConfigReloadResponse {
+        try await send("POST", "api/v1/config/reload", as: ConfigReloadResponse.self)
+    }
+
     /// Requests a single-use token for enrolling another node.
     public func joinToken() async throws -> JoinTokenResponse {
         try await send("POST", "api/v1/nodes/join-token", as: JoinTokenResponse.self)

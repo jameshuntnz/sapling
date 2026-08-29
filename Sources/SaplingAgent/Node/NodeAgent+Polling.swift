@@ -8,8 +8,11 @@ import SaplingDB
 /// records what's queued so the UI stays useful while work is held back.
 extension NodeAgent {
     func pollLoop() async {
-        let interval = Duration.seconds(max(5, config.github.pollIntervalSeconds))
         while !Task.isCancelled {
+            // Read per cycle, not once: `sapling config reload` can change the
+            // interval under a running loop, and a value captured before the
+            // loop would hold the old one until the daemon restarted.
+            let interval = Duration.seconds(max(5, config.github.pollIntervalSeconds))
             do {
                 try await pollOnce()
                 try await store.setState(

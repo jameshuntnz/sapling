@@ -24,7 +24,15 @@ public actor NodeAgent {
     /// When discovery last succeeded, for the refresh interval.
     var reposRefreshedAt: Date?
 
-    let config: SaplingConfig
+    /// The configuration in force.
+    ///
+    /// Mutable because `sapling config reload` swaps the reloadable half of it
+    /// under a running daemon (`NodeAgent+Config.swift`). Everything here
+    /// reads it at the point of use rather than caching it, which is what
+    /// makes that safe — see `ConfigReload` for the fields it covers.
+    var config: SaplingConfig
+    /// The file `config` was loaded from, and the one a reload re-reads.
+    let configURL: URL
     let store: SaplingStore
     let github: GitHubClient
     let macProvider: (any JobProvider)?
@@ -95,10 +103,20 @@ public actor NodeAgent {
     var networkGuardApplied = false
 
     /// Creates an agent for the given configuration and store.
-    public init(config: SaplingConfig, store: SaplingStore) {
+    ///
+    /// - Parameters:
+    ///   - config: The configuration to run with.
+    ///   - store: Where job and node state is recorded.
+    ///   - configURL: The file `config` came from, re-read on reload.
+    public init(
+        config: SaplingConfig,
+        store: SaplingStore,
+        configURL: URL = SaplingPaths.configFile
+    ) {
         self.init(
             config: config,
             store: store,
+            configURL: configURL,
             macProvider: config.macos.enabled ? TartProvider(config: config.macos) : nil,
             linuxProvider: config.linux.enabled ? ContainerProvider(config: config.linux) : nil
         )
@@ -113,6 +131,7 @@ public actor NodeAgent {
     init(
         config: SaplingConfig,
         store: SaplingStore,
+        configURL: URL = SaplingPaths.configFile,
         macProvider: (any JobProvider)?,
         linuxProvider: (any JobProvider)?,
         conclusionAttempts: Int = NodeAgent.defaultConclusionAttempts,
@@ -121,6 +140,7 @@ public actor NodeAgent {
         self.conclusionAttempts = conclusionAttempts
         self.conclusionRetryDelay = conclusionRetryDelay
         self.config = config
+        self.configURL = configURL
         self.store = store
         self.github = GitHubClient(config: config.github)
         self.macProvider = macProvider

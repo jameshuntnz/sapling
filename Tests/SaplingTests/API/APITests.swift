@@ -18,6 +18,9 @@ struct APITests {
         var config = SaplingConfig()
         config.node.name = "test-node"
         config.github.repos = ["acme/widgets"]
+        // A credential in the fixture, so the config endpoint's redaction is
+        // checked against the bytes actually put on the wire.
+        config.github.token = "ghp_never_serve_this"
         config.server.bind = "loopback"
         config.server.port = 0
 
@@ -207,6 +210,34 @@ struct APITests {
             #expect((response as? HTTPURLResponse)?.statusCode == 400)
             let decoded = try SaplingJSON.decoder.decode(APIErrorResponse.self, from: data)
             #expect(decoded.error == "invalid_status")
+        }
+    }
+
+    @Test("serves the running configuration without its credentials")
+    func configuration() async throws {
+        try await withServer { _, client in
+            let response = try await client.configuration()
+            #expect(!response.path.isEmpty)
+            #expect(response.entries.contains { $0.key == "github.repos" && $0.value == "[acme/widgets]" })
+
+            let token = response.entries.first { $0.key == "github.token" }
+            #expect(token?.value == "(set)")
+            #expect(!response.entries.map(\.value).joined().contains("ghp_"))
+            // The reloadable marking is what the CLI prints, so it has to
+            // survive the round trip rather than being worked out client-side.
+            #expect(response.entries.first { $0.key == "server.port" }?.reloadable == false)
+            #expect(response.entries.first { $0.key == "github.repos" }?.reloadable == true)
+        }
+    }
+
+    /// A control plane with no agent — `sapling demo` — has no live
+    /// configuration to swap, and says so rather than reporting a no-op.
+    @Test("refuses a reload when nothing is holding a live configuration")
+    func reloadWithoutAgent() async throws {
+        try await withServer { _, client in
+            let response = try await client.reloadConfig()
+            #expect(!response.reloaded)
+            #expect(response.error?.contains("no node agent") == true)
         }
     }
 }

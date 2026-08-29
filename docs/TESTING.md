@@ -243,6 +243,29 @@ sapling drain                     # blocks until running jobs finish
 
 **Expect:** cordoned nodes still *see* queued jobs (so the UI stays useful) but don't dispatch them.
 
+## Phase 9 — Config reload
+
+The one that has to be checked with a job running, because that is the whole
+point of it: a restart would fail the build.
+
+```bash
+# start a long job, then, while it runs:
+sudo vi ~/.sapling/config.toml    # change poll_interval_seconds and server.port
+sapling config show               # both listed, under reload and restart
+sapling config reload
+sapling status                    # the job is still running
+sudo killall -HUP sapling         # same reload, from the node itself
+```
+
+**Expect:** the interval change applied, the port change reported as needing a
+restart, and the running job untouched. `grep "config:" ~/.sapling/logs/sapling.out.log`
+should show one line per applied field.
+
+Then break the file on purpose — an unclosed `[section` — and reload again.
+**Expect:** a rejection naming the line, the daemon still serving, and
+`sapling status` unchanged. `sapling config edit` should refuse to save the
+same edit while telling you where it kept it.
+
 ---
 
 ## Known rough edges

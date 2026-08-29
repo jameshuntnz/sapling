@@ -26,12 +26,13 @@ struct ControlPlane: Sendable {
     }
 
     func status() async throws -> StatusResponse {
-        let nodeID = agent?.nodeID ?? NodeAgent.stableNodeID(name: config.node.name)
+        let live = await effectiveConfig()
+        let nodeID = agent?.nodeID ?? NodeAgent.stableNodeID(name: live.node.name)
         let node =
             try await store.node(id: nodeID)
             ?? Node(
                 id: nodeID,
-                name: config.node.name,
+                name: live.node.name,
                 platform: "darwin/arm64",
                 lastSeenAt: nil,
                 status: .offline
@@ -42,25 +43,25 @@ struct ControlPlane: Sendable {
             SlotUsage(
                 platform: .macos,
                 inUse: inUse[.macos] ?? 0,
-                capacity: config.macos.effectiveMaxConcurrent
+                capacity: live.macos.effectiveMaxConcurrent
             ),
             SlotUsage(
                 platform: .linux,
                 inUse: inUse[.linux] ?? 0,
-                capacity: config.linux.effectiveMaxConcurrent
+                capacity: live.linux.effectiveMaxConcurrent
             ),
         ]
-        let nodeCapacity = config.node.effectiveMaxConcurrent(
-            macOS: config.macos.effectiveMaxConcurrent,
-            linux: config.linux.effectiveMaxConcurrent)
+        let nodeCapacity = live.node.effectiveMaxConcurrent(
+            macOS: live.macos.effectiveMaxConcurrent,
+            linux: live.linux.effectiveMaxConcurrent)
 
         // Charged the larger default for a job recorded before sizes existed:
         // which platform an unsized survivor belonged to is exactly what is not
         // known, and under-reporting free memory is the safer way to be wrong.
         let totalGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
         let fallbackGB = max(
-            config.macos.memoryGB ?? MacOSConfig.baseImageDefaultMemoryGB,
-            config.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
+            live.macos.memoryGB ?? MacOSConfig.baseImageDefaultMemoryGB,
+            live.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
         let committedGB = (try? await store.committedMemoryGB(fallbackGB: fallbackGB)) ?? 0
 
         let dayAgo = Date().addingTimeInterval(-86400)
@@ -68,8 +69,8 @@ struct ControlPlane: Sendable {
         // Configured repos win; otherwise report what discovery actually
         // resolved, which is the honest answer to "what is this node watching".
         let watched: [String]
-        if !config.github.repos.isEmpty {
-            watched = config.github.repos
+        if !live.github.repos.isEmpty {
+            watched = live.github.repos
         } else {
             let raw = try await store.state(SaplingStore.StateKey.watchedRepos) ?? "[]"
             watched = (try? JSONDecoder().decode([String].self, from: Data(raw.utf8))) ?? []
@@ -80,7 +81,7 @@ struct ControlPlane: Sendable {
             node: node,
             slots: slots,
             nodeCapacity: nodeCapacity,
-            memoryBudgetGB: config.node.memoryBudgetGB(totalGB: totalGB),
+            memoryBudgetGB: live.node.memoryBudgetGB(totalGB: totalGB),
             committedMemoryGB: committedGB,
             queuedJobs: try await store.countJobs(status: .queued),
             runningJobs: (inUse[.macos] ?? 0) + (inUse[.linux] ?? 0),
@@ -92,6 +93,17 @@ struct ControlPlane: Sendable {
             lastPollError: try await store.state(SaplingStore.StateKey.lastPollError),
             metrics: await agent?.metrics.current()
         )
+    }
+
+    /// The configuration actually in force.
+    ///
+    /// Asked of the agent rather than held here, because `sapling config
+    /// reload` changes it under a running daemon and a second copy would go
+    /// stale the moment it did. Falls back to the configuration this control
+    /// plane was constructed with when there is no agent in this process —
+    /// `sapling demo`, and the tests.
+    func effectiveConfig() async -> SaplingConfig {
+        await agent?.currentConfig() ?? config
     }
 
     func nodes() async throws -> [Node] {
@@ -179,18 +191,19 @@ struct ControlPlane: Sendable {
     ///
     /// - Returns: What is available, and what is running now.
     public func checkForUpdate() async -> UpdateCheckResponse {
+        let live = await effectiveConfig()
         do {
-            let update = try await SelfUpdater(config: config).check()
+            let update = try await SelfUpdater(config: live).check()
             return UpdateCheckResponse(
                 current: SaplingVersion.current,
-                channel: config.update.channel,
+                channel: live.update.channel,
                 available: update?.version,
                 tag: update?.tag,
                 publishedAt: update?.publishedAt)
         } catch {
             return UpdateCheckResponse(
                 current: SaplingVersion.current,
-                channel: config.update.channel,
+                channel: live.update.channel,
                 error: error.localizedDescription)
         }
     }
@@ -204,7 +217,8 @@ struct ControlPlane: Sendable {
     /// - Parameter force: Update even while jobs are running.
     /// - Returns: What is being applied, or why nothing is.
     public func applyUpdate(force: Bool) async -> UpdateApplyResponse {
-        let updater = SelfUpdater(config: config)
+        let live = await effectiveConfig()
+        let updater = SelfUpdater(config: live)
         let update: AvailableUpdate?
         do {
             // With force, take the newest release on the channel whether or not
@@ -218,7 +232,7 @@ struct ControlPlane: Sendable {
             return UpdateApplyResponse(
                 applying: false,
                 message: "already on \(SaplingVersion.current), the newest on the "
-                    + "\(config.update.channel.rawValue) channel")
+                    + "\(live.update.channel.rawValue) channel")
         }
 
         let running = await agent?.activeJobCount() ?? 0

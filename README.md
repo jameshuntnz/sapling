@@ -116,6 +116,11 @@ sapling nodes join-token   Generate an enrollment token.
 sapling drain              Stop accepting new jobs, wait for running ones.
 sapling cordon / uncordon  Pause / resume job acceptance.
 
+sapling config             Show the configuration the daemon is running with.
+sapling config reload      Re-read config.toml without restarting the daemon.
+sapling config validate    Parse and check a config file, warnings included.
+sapling config edit        Edit in $EDITOR, check it, save it, reload the daemon.
+
 sapling update             Install the newest release on the node's channel.
 sapling update --check     Report what's available without installing it.
 ```
@@ -134,6 +139,8 @@ GET  /api/v1/jobs?status=&limit=  list jobs
 GET  /api/v1/jobs/:id             job detail
 GET  /api/v1/jobs/:id/logs?after= event log, tailable
 GET  /api/v1/jobs/:id/resources   that job's VM or container, against its limits
+GET  /api/v1/config               effective config, credentials redacted
+POST /api/v1/config/reload        re-read config.toml without a restart
 POST /api/v1/drain                stop accepting new jobs
 POST /api/v1/cordon               pause acceptance
 POST /api/v1/uncordon             resume acceptance
@@ -199,6 +206,41 @@ channel = "stable"       # stable | rc | dev
 check_interval_hours = 6
 auto_apply = false       # even when true, only applies while idle
 ```
+
+### Changing it without stopping the node
+
+`sapling config reload` re-reads the file into the running daemon; `SIGHUP`
+does the same from the node itself. Neither restarts anything, which matters
+because a restart fails whatever job is mid-build — up to two hours of it.
+
+Only the fields the daemon reads at the point of use change live: the poll
+list and interval, the concurrency and memory ceilings, the labels, the Linux
+default image, and the whole `[update]` section. Everything else was consumed
+once — the listener is bound, the providers hold their platform settings, the
+pf anchor is written — so a reload **reports** those and leaves them alone
+rather than letting the file describe something the machine isn't doing.
+
+```
+$ sapling config reload
+applied 2 fields; 1 field needs a daemon restart
+
+Applied
+  github.poll_interval_seconds  30 → 60
+  github.repos                  [acme/widgets] → [acme/widgets, acme/gizmos]
+
+Needs a daemon restart
+  server.port                   8734 → 9001
+```
+
+The file is parsed and validated in full before any of it is applied, so a
+typo leaves the node exactly as it was. `sapling config show` says the same
+thing ahead of time — what is running, and what is waiting in the file for a
+reload or a restart — and `sapling config edit` does the whole loop through a
+copy, so an edit that fails to parse is never written back.
+
+There is no `config set`. The file is hand-written TOML whose comments explain
+why a node is tuned the way it is, and writing it back from a decoded struct
+would throw all of that away.
 
 ---
 

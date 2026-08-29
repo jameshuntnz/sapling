@@ -16,6 +16,7 @@ struct Sapling: AsyncParsableCommand {
             Update.self,
             Uninstall.self,
             Status.self,
+            Config.self,
             Jobs.self,
             Nodes.self,
             Drain.self,
