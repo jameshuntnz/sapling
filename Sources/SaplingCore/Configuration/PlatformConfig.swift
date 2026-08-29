@@ -159,9 +159,12 @@ public struct LinuxConfig: Codable, Sendable {
     /// Whether this node will build images defined by the repositories it runs.
     ///
     /// A repository's Dockerfile executes arbitrary commands on the node at
-    /// build time, outside the job container. Sapling already assumes trusted
-    /// job code and refuses public repos, so this fits that model — but it is
-    /// a wider grant than running a job, and a node can decline it.
+    /// build time, outside the job container. What bounds that is `ForkPolicy`
+    /// — the definition is read at the job's own commit, and only commits from
+    /// the watched repository are ever run — so this is the same trust as
+    /// running a job, granted more widely. A node can decline it, and on a
+    /// public repository that is worth thinking about twice: the people who can
+    /// push to it are the people who can run a build step as this daemon.
     public var buildImages: Bool
     /// Directory, within each repository, holding image definitions.
     ///

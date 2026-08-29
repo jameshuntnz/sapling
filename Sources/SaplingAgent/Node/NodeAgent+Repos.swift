@@ -36,33 +36,32 @@ extension NodeAgent {
             let result = try await github.installationRepositories()
             reposRefreshedAt = now
 
-            if result.private != discoveredRepos {
-                let added = Set(result.private).subtracting(discoveredRepos)
-                let removed = Set(discoveredRepos).subtracting(result.private)
+            if result.watched != discoveredRepos {
+                let added = Set(result.watched).subtracting(discoveredRepos)
+                let removed = Set(discoveredRepos).subtracting(result.watched)
                 if !added.isEmpty { Log.info("now watching \(added.sorted().joined(separator: ", "))") }
                 if !removed.isEmpty {
                     Log.info("no longer watching \(removed.sorted().joined(separator: ", "))")
                 }
             }
-            discoveredRepos = result.private
+            discoveredRepos = result.watched
 
             if !result.skippedPublic.isEmpty {
                 Log.warn(
                     """
                     ignoring \(result.skippedPublic.count) public repo(s) in this installation: \
-                    \(result.skippedPublic.sorted().joined(separator: ", ")). Sapling does not \
-                    sandbox against adversarial job code, so public repos are never watched by \
-                    discovery. List one in github.repos to override.
+                    \(result.skippedPublic.sorted().joined(separator: ", ")). Discovery does not \
+                    watch public repos unless github.allow_public_repos is on; list one in \
+                    github.repos to take just that one.
                     """)
             }
-            if result.private.isEmpty {
-                Log.warn(
-                    "this App installation grants no private repositories — nothing will be polled")
+            if result.watched.isEmpty {
+                Log.warn("this App installation grants no watchable repositories — nothing will be polled")
             }
 
             try? await store.setState(
-                SaplingStore.StateKey.watchedRepos, Self.encode(result.private))
-            return result.private
+                SaplingStore.StateKey.watchedRepos, Self.encode(result.watched))
+            return result.watched
         } catch {
             Log.error("could not list installation repositories: \(error.localizedDescription)")
             // Keep whatever was last known rather than dropping to nothing.

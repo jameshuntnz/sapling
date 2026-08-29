@@ -94,55 +94,6 @@ actor GitHubClient {
         return data
     }
 
-    // MARK: - Job discovery
-
-    /// Every job GitHub currently reports as queued for a repo.
-    ///
-    /// There's no "list queued jobs for a repo" endpoint, so this walks the
-    /// runs that could plausibly contain one — `queued` runs, plus
-    /// `in_progress` runs, which routinely have later jobs still waiting.
-    func queuedJobs(repo: String) async throws -> [WorkflowJob] {
-        var runIDs: [Int64] = []
-        for status in ["queued", "in_progress"] {
-            let response = try await request(
-                "GET",
-                "/repos/\(repo)/actions/runs?status=\(status)&per_page=50",
-                as: WorkflowRunsResponse.self
-            )
-            runIDs.append(contentsOf: response.workflowRuns.map(\.id))
-        }
-
-        var jobs: [WorkflowJob] = []
-        for runID in Set(runIDs) {
-            let response = try await request(
-                "GET",
-                "/repos/\(repo)/actions/runs/\(runID)/jobs?per_page=100",
-                as: WorkflowJobsResponse.self
-            )
-            jobs.append(contentsOf: response.jobs.filter(\.isQueued))
-        }
-        return jobs
-    }
-
-    /// Every job in one workflow run.
-    ///
-    /// Needed before cancelling a run: GitHub has no per-job cancel — the only
-    /// endpoint is "cancel this run", which takes every sibling with it. So
-    /// the siblings have to be looked at first.
-    func jobs(repo: String, runID: Int64) async throws -> [WorkflowJob] {
-        try await request(
-            "GET",
-            "/repos/\(repo)/actions/runs/\(runID)/jobs?per_page=100",
-            as: WorkflowJobsResponse.self
-        ).jobs
-    }
-
-    /// Current state of one job, used to reconcile what actually happened
-    /// after a runner exits.
-    func job(repo: String, jobID: Int64) async throws -> WorkflowJob {
-        try await request("GET", "/repos/\(repo)/actions/jobs/\(jobID)", as: WorkflowJob.self)
-    }
-
     // MARK: - Installation
 
     /// Every repository this App installation can reach.
@@ -151,12 +102,16 @@ actor GitHubClient {
     /// granted, so adding a repository is done once on GitHub rather than
     /// twice — there and again in the node's config.
     ///
-    /// Public repositories are **excluded**. Sapling does not sandbox against
-    /// adversarial job code, so a public repo reaching this list by way of an
-    /// installation nobody re-read is exactly the accident worth preventing.
-    /// A public repo named explicitly in config still runs, with a warning:
-    /// naming it is a decision, inheriting it is not.
-    func installationRepositories() async throws -> (private: [String], skippedPublic: [String]) {
+    /// Public repositories are excluded unless `github.allow_public_repos`
+    /// says otherwise. Fork pull requests are refused everywhere and always —
+    /// see `ForkPolicy` — so this is not the safety boundary; it is the
+    /// narrower question of whether a public repository may arrive by way of
+    /// an installation nobody re-read. Inheriting one is not a decision;
+    /// naming it in `github.repos`, or turning the flag on, is.
+    ///
+    /// - Returns: The repositories to watch, and the public ones left out.
+    /// - Throws: If the installation cannot be listed.
+    func installationRepositories() async throws -> (watched: [String], skippedPublic: [String]) {
         var accepted: [String] = []
         var skipped: [String] = []
         var page = 1
@@ -168,7 +123,7 @@ actor GitHubClient {
             )
             if response.repositories.isEmpty { break }
             for repository in response.repositories {
-                if repository.private {
+                if repository.private || config.allowPublicRepos {
                     accepted.append(repository.fullName)
                 } else {
                     skipped.append(repository.fullName)

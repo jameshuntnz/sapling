@@ -46,6 +46,14 @@ struct FakeGitHubFixtures {
     /// Repos whose run listing should fail, for testing that one unreachable
     /// repo doesn't distort what we believe about the others.
     var failingRepos: Set<String> = []
+    /// Runs whose head repository is a fork, in the shape GitHub reports a
+    /// pull request opened from one.
+    var forkRunIDs: Set<Int64> = []
+    /// Runs GitHub reports with a null head repository — what it does when the
+    /// fork behind a pull request has since been deleted.
+    var runsWithoutHeadRepository: Set<Int64> = []
+    /// Runs whose head repository differs from the watched repo only in case.
+    var mixedCaseRunIDs: Set<Int64> = []
 }
 
 /// A stand-in for the GitHub REST API.
@@ -82,7 +90,24 @@ struct FakeGitHubServer {
             }
             let status = (try? request.query.get(String.self, at: "status")) ?? ""
             let ids = status == "queued" ? fixtures.queuedRunIDs : fixtures.inProgressRunIDs
-            let runs = ids.map { #"{"id":\#($0),"name":"CI","status":"\#(status)"}"# }
+            let runs = ids.map { id -> String in
+                let provenance: String
+                if fixtures.runsWithoutHeadRepository.contains(id) {
+                    provenance = #""event":"pull_request","head_repository":null"#
+                } else if fixtures.forkRunIDs.contains(id) {
+                    // `fork: true` on a head repository that is not the watched
+                    // one — the ordinary contributor's pull request.
+                    provenance =
+                        #""event":"pull_request","head_repository":{"full_name":"outsider/widgets","fork":true}"#
+                } else if fixtures.mixedCaseRunIDs.contains(id) {
+                    provenance =
+                        #""event":"push","head_repository":{"full_name":"\#(repo.uppercased())","fork":false}"#
+                } else {
+                    provenance =
+                        #""event":"push","head_repository":{"full_name":"\#(repo)","fork":false}"#
+                }
+                return #"{"id":\#(id),"name":"CI","status":"\#(status)","head_branch":"main",\#(provenance)}"#
+            }
             return Self.json(#"{"workflow_runs":[\#(runs.joined(separator: ","))]}"#)
         }
 

@@ -20,6 +20,7 @@ struct ConfigReloadTests {
         config.github.repos = ["acme/one", "acme/two"]
         config.github.pollIntervalSeconds = 90
         config.github.cancelRunWhenExhausted = true
+        config.github.allowPublicRepos = true
 
         config.node.maxConcurrent = 3
         config.node.memoryReserveGB = 8

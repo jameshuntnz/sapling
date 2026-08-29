@@ -47,12 +47,29 @@ public struct GitHubConfig: Codable, Sendable {
     /// stuck job takes its siblings with it".
     public var cancelRunWhenExhausted: Bool
 
+    /// Whether discovery may watch public repositories.
+    ///
+    /// Off by default. A public repository is not dangerous in itself — the
+    /// danger was always fork pull requests, and `ForkPolicy` refuses those
+    /// unconditionally, on every repository, with no way to turn it off. What
+    /// this switch actually decides is whether a public repository can arrive
+    /// through an App installation nobody re-read, which is a different
+    /// question from whether one may be run at all.
+    ///
+    /// Turning it on is not the whole job. Set GitHub's own
+    /// *Require approval for all outside collaborators* on each public
+    /// repository: that stops a fork's jobs reaching the queue in the first
+    /// place, where this node can only decline them and leave them waiting out
+    /// GitHub's timeout.
+    public var allowPublicRepos: Bool
+
     enum CodingKeys: String, CodingKey {
         case auth, token, repos
         case appID = "app_id"
         case installationID = "installation_id"
         case privateKeyPath = "private_key_path"
         case pollIntervalSeconds = "poll_interval_seconds"
+        case allowPublicRepos = "allow_public_repos"
         case apiBaseURL = "api_base_url"
         case cancelRunWhenExhausted = "cancel_run_when_exhausted"
     }
@@ -67,6 +84,7 @@ public struct GitHubConfig: Codable, Sendable {
         repos: [String] = [],
         pollIntervalSeconds: Int = 30,
         cancelRunWhenExhausted: Bool = false,
+        allowPublicRepos: Bool = false,
         apiBaseURL: String = "https://api.github.com"
     ) {
         self.auth = auth
@@ -78,6 +96,7 @@ public struct GitHubConfig: Codable, Sendable {
         self.pollIntervalSeconds = pollIntervalSeconds
         self.apiBaseURL = apiBaseURL
         self.cancelRunWhenExhausted = cancelRunWhenExhausted
+        self.allowPublicRepos = allowPublicRepos
     }
 
     /// Creates a GitHub configuration.
@@ -93,6 +112,7 @@ public struct GitHubConfig: Codable, Sendable {
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? "https://api.github.com"
         cancelRunWhenExhausted =
             try c.decodeIfPresent(Bool.self, forKey: .cancelRunWhenExhausted) ?? false
+        allowPublicRepos = try c.decodeIfPresent(Bool.self, forKey: .allowPublicRepos) ?? false
     }
 
     /// The private key path with `~` expanded, or `nil` if unset.

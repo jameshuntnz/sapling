@@ -46,18 +46,26 @@ extension NodeAgent {
 
     /// §8: Sapling assumes trusted job code.
     ///
-    /// A public repo can be made to run fork PR code, which breaks that
-    /// assumption, so say so loudly.
+    /// A public repository is watchable now, but only because `ForkPolicy`
+    /// refuses every run whose code did not come from the repository itself.
+    /// That closes the path that mattered — a stranger opening a pull request
+    /// — and closes nothing else: a public repository's own commits still run
+    /// unsandboxed on this machine, so who can push to it is still the whole
+    /// of the access control.
+    ///
+    /// Said at startup because the two settings that make it safe live on
+    /// GitHub, not here, and nothing on this node can check them.
     func warnAboutPublicRepos() async {
         for repo in await watchedRepos() {
-            if let isPublic = try? await github.isPublic(repo: repo), isPublic {
-                Log.error(
-                    """
-                    WATCHED REPO \(repo) IS PUBLIC. Sapling does not sandbox against adversarial \
-                    job code (§2). Anyone who can open a pull request may be able to run code on \
-                    this machine. Use private repos only.
-                    """)
-            }
+            guard let isPublic = try? await github.isPublic(repo: repo), isPublic else { continue }
+            Log.warn(
+                """
+                watched repo \(repo) is PUBLIC. Fork pull requests are refused and cannot be \
+                enabled, but commits pushed to \(repo) itself run unsandboxed on this machine. \
+                Set "Require approval for all outside collaborators" on the repository so fork \
+                jobs never reach the queue, and keep push access to people you would give a shell \
+                to.
+                """)
         }
     }
 }

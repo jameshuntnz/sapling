@@ -25,10 +25,29 @@ struct WorkflowJobsResponse: Decodable {
     let jobs: [WorkflowJob]
 }
 
+/// The repository a run's head commit lives on.
+///
+/// Nullable in GitHub's payload: a pull request whose fork has since been
+/// deleted reports no head repository at all.
+struct RunHeadRepository: Decodable, Sendable {
+    let fullName: String?
+}
+
 struct WorkflowRun: Decodable {
     let id: Int64
     let name: String?
     let status: String?
+    /// What triggered the run.
+    ///
+    /// `push`, `pull_request`, `workflow_run`, and so on. Recorded to explain
+    /// a refusal, never to decide one.
+    let event: String?
+    let headBranch: String?
+    /// Where the run's code came from, and the whole basis for admitting it.
+    ///
+    /// See `ForkPolicy`: this is compared by name against the watched
+    /// repository, and anything else — including its absence — is refused.
+    let headRepository: RunHeadRepository?
 }
 
 struct WorkflowRunsResponse: Decodable {

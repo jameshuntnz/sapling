@@ -100,6 +100,13 @@ public actor NodeAgent {
     /// yet looks exactly like one of those. Without this it deleted runners it
     /// had minted seconds earlier.
     var inFlightRunners: Set<String> = []
+    /// Runs already refused on provenance and already logged.
+    ///
+    /// Keyed `repo#runID`, and rebuilt each poll from what GitHub still has
+    /// queued, so it cannot grow without bound on a busy public repository.
+    var refusedForkRuns: Set<String> = []
+    /// How many runs have been refused on provenance since the daemon started.
+    var forkRunsRefused = 0
     var networkGuardApplied = false
 
     /// Creates an agent for the given configuration and store.

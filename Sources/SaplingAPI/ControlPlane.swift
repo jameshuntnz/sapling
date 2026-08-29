@@ -91,6 +91,8 @@ struct ControlPlane: Sendable {
             watchedRepos: watched,
             lastPollAt: lastPollRaw.flatMap { ISO8601DateFormatter().date(from: $0) },
             lastPollError: try await store.state(SaplingStore.StateKey.lastPollError),
+            forkRunsRefused: Int(
+                try await store.state(SaplingStore.StateKey.forkRunsRefused) ?? "") ?? 0,
             metrics: await agent?.metrics.current()
         )
     }

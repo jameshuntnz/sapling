@@ -22,6 +22,13 @@ public final class SaplingStore: Sendable {
         /// so `status` reports what is actually watched, not what was asked
         /// for.
         public static let watchedRepos = "watched_repos"
+        /// How many workflow runs have been refused because their code came
+        /// from somewhere other than the repository being watched.
+        ///
+        /// Counted since the daemon started rather than for all time: the
+        /// number answers "is this node quietly turning away everything?", and
+        /// a lifetime total that only goes up answers nothing.
+        public static let forkRunsRefused = "fork_runs_refused"
     }
 
     let writer: any DatabaseWriter

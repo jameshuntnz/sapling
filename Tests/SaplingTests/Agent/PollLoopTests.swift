@@ -51,6 +51,54 @@ struct PollLoopTests {
         }
     }
 
+    /// End to end: a fork's run leaves no trace in the job table and nothing
+    /// is sent to GitHub about it.
+    ///
+    /// Recording one as a failed job was considered and rejected. A public
+    /// repository can carry more fork pull requests than real work, and filing
+    /// each as a failure would bury the node's actual jobs in the UI and count
+    /// a working node as a broken one — the argument `JobStatus.cancelled`
+    /// already makes for itself.
+    @Test("a fork's run leaves no job behind and cancels nothing")
+    func refusesForkRuns() async throws {
+        var fixtures = FakeGitHubFixtures()
+        fixtures.queuedRunIDs = [100]
+        fixtures.jobsByRun = [100: FakeGitHubFixtureLibrary.threePlatforms]
+        fixtures.forkRunIDs = [100]
+        let server = try await FakeGitHubServer.start(fixtures: fixtures)
+
+        var config = SaplingConfig()
+        config.node.memoryBudgetOverrideGB = 64
+        config.node.name = "mini"
+        config.github = server.githubConfig()
+        // On, to prove the refusal path does not reach it: cancelling is a
+        // whole-run operation, and cancelling a contributor's pull request
+        // would take its GitHub-hosted jobs down with ours.
+        config.github.cancelRunWhenExhausted = true
+
+        let store = try SaplingStore(inMemoryNamed: UUID().uuidString)
+        let agent = NodeAgent(config: config, store: store)
+        try await store.upsertNode(
+            Node(
+                id: agent.nodeID, name: "mini", platform: "darwin/arm64",
+                lastSeenAt: Date(), status: .cordoned
+            ))
+
+        try await agent.pollOnce()
+
+        #expect(try await store.jobs().isEmpty)
+        #expect(server.state.cancelledRuns.isEmpty, "must not cancel a fork's run")
+        #expect(server.state.jobsRequests.isEmpty, "must not open a fork's run at all")
+        #expect(try await store.state(SaplingStore.StateKey.forkRunsRefused) == "1")
+
+        // Said once, not once a cycle: the run stays queued on GitHub until
+        // its own timeout, so every poll sees it again.
+        try await agent.pollOnce()
+        #expect(try await store.state(SaplingStore.StateKey.forkRunsRefused) == "1")
+
+        await server.shutdown()
+    }
+
     @Test("records queued jobs this node can run, and skips ones it can't")
     func discoversMatchingJobs() async throws {
         try await withFakeGitHub { agent, store in

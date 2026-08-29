@@ -62,6 +62,11 @@ struct Status: AsyncParsableCommand {
             "  watching          \(status.watchedRepos.isEmpty ? Style.dim("(none)") : status.watchedRepos.joined(separator: ", "))"
         )
         print("  last poll         \(Format.relative(status.lastPollAt))")
+        if status.forkRunsRefused > 0 {
+            print(
+                "  forks refused     \(status.forkRunsRefused)"
+                    + Style.dim("  (runs whose code came from outside the watched repo)"))
+        }
         if let error = status.lastPollError {
             print("  \(Style.red("poll error"))        \(error)")
         }

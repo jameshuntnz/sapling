@@ -64,6 +64,7 @@ extension NodeAgent {
 
         if !live.isEmpty {
             let previousRepos = config.github.repos
+            let previouslyAllowedPublic = config.github.allowPublicRepos
             config = ConfigReload.merge(running: config, incoming: incoming)
             for change in live {
                 Log.info("config: \(change.key) \(change.from) → \(change.to)")
@@ -72,7 +73,9 @@ extension NodeAgent {
             // minutes. Editing the poll list and then waiting out that window
             // looks exactly like a reload that did nothing, so the cache goes
             // when the list it stands in for changes.
-            if previousRepos != config.github.repos {
+            if previousRepos != config.github.repos
+                || previouslyAllowedPublic != config.github.allowPublicRepos
+            {
                 reposRefreshedAt = nil
             }
         }

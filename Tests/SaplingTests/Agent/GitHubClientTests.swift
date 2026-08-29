@@ -31,10 +31,40 @@ struct GitHubClientTests {
         }
     }
 
+    /// Same fixtures, with run 100 arriving from a fork instead.
+    func withForkedRun<T>(
+        forkRunIDs: Set<Int64> = [],
+        runsWithoutHeadRepository: Set<Int64> = [],
+        mixedCaseRunIDs: Set<Int64> = [],
+        _ body: (GitHubClient, FakeGitHubState) async throws -> T
+    ) async throws -> T {
+        var fixtures = FakeGitHubFixtures()
+        fixtures.queuedRunIDs = [100]
+        fixtures.inProgressRunIDs = [200]
+        fixtures.jobsByRun = [
+            100: FakeGitHubFixtureLibrary.mixedStatuses,
+            200: FakeGitHubFixtureLibrary.queuedBehindRunningRun,
+        ]
+        fixtures.forkRunIDs = forkRunIDs
+        fixtures.runsWithoutHeadRepository = runsWithoutHeadRepository
+        fixtures.mixedCaseRunIDs = mixedCaseRunIDs
+
+        let server = try await FakeGitHubServer.start(fixtures: fixtures)
+        let client = GitHubClient(config: server.githubConfig())
+        do {
+            let result = try await body(client, server.state)
+            await server.shutdown()
+            return result
+        } catch {
+            await server.shutdown()
+            throw error
+        }
+    }
+
     @Test("collects queued jobs from both queued and in-progress runs")
     func queuedJobs() async throws {
         try await withFakeGitHub { client, state in
-            let jobs = try await client.queuedJobs(repo: "acme/widgets")
+            let jobs = try await client.queuedWork(repo: "acme/widgets").jobs
 
             // Only queued jobs come back; the in_progress one is filtered out.
             #expect(Set(jobs.map(\.id)) == [9001, 9003])
@@ -133,8 +163,8 @@ struct GitHubClientTests {
         }
     }
 
-    /// §8: a public repo can be made to run fork-PR code, which breaks the
-    /// trusted-code assumption the whole design rests on.
+    /// §8: a public repo's own commits still run unsandboxed, so the daemon
+    /// says so at startup even though fork PRs are refused for it.
     @Test("detects repository visibility")
     func repositoryVisibility() async throws {
         try await withFakeGitHub { client, _ in
@@ -142,6 +172,48 @@ struct GitHubClientTests {
             #expect(privateRepo == false)
             let publicRepo = try await client.isPublic(repo: "public-owner/public-repo")
             #expect(publicRepo == true)
+        }
+    }
+
+    /// The assertion that matters is `jobsRequests`, not the returned jobs.
+    ///
+    /// A fork's run must be refused *before* its jobs are fetched: the pipeline
+    /// downstream reads a repository's image definitions at the job's commit
+    /// and builds them on the node, outside any container, so a refusal that
+    /// happens after the jobs are known is a refusal that happens after a
+    /// fork's Dockerfile could have run.
+    @Test("never looks inside a run whose code came from a fork")
+    func refusesForkRuns() async throws {
+        try await withForkedRun(forkRunIDs: [100]) { client, state in
+            let work = try await client.queuedWork(repo: "acme/widgets")
+
+            #expect(state.jobsRequests == [200], "the fork's run must never be opened")
+            #expect(Set(work.jobs.map(\.id)) == [9003])
+            #expect(work.refusedRuns.map(\.id) == [100])
+            #expect(work.refusedRuns.first?.reason.contains("outsider/widgets") == true)
+        }
+    }
+
+    /// That GitHub said nothing is not permission.
+    ///
+    /// It reports no head repository once the fork behind a pull request is
+    /// deleted.
+    @Test("refuses a run whose provenance GitHub did not report")
+    func refusesUnknownProvenance() async throws {
+        try await withForkedRun(runsWithoutHeadRepository: [100]) { client, state in
+            let work = try await client.queuedWork(repo: "acme/widgets")
+            #expect(state.jobsRequests == [200])
+            #expect(work.refusedRuns.map(\.id) == [100])
+        }
+    }
+
+    /// GitHub returns whatever case was typed, and the config file has its own.
+    @Test("runs a repository's own commits whatever the case")
+    func admitsMixedCaseHeadRepository() async throws {
+        try await withForkedRun(mixedCaseRunIDs: [100]) { client, state in
+            let work = try await client.queuedWork(repo: "acme/widgets")
+            #expect(work.refusedRuns.isEmpty)
+            #expect(Set(state.jobsRequests) == [100, 200])
         }
     }
 

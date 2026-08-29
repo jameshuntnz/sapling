@@ -62,6 +62,7 @@ public enum ConfigReload {
         "github.repos",
         "github.poll_interval_seconds",
         "github.cancel_run_when_exhausted",
+        "github.allow_public_repos",
         "node.max_concurrent",
         "node.memory_reserve_gb",
         "node.memory_budget_gb",
@@ -223,6 +224,7 @@ public enum ConfigReload {
         merged.github.repos = incoming.github.repos
         merged.github.pollIntervalSeconds = incoming.github.pollIntervalSeconds
         merged.github.cancelRunWhenExhausted = incoming.github.cancelRunWhenExhausted
+        merged.github.allowPublicRepos = incoming.github.allowPublicRepos
 
         merged.node.maxConcurrent = incoming.node.maxConcurrent
         merged.node.memoryReserveGB = incoming.node.memoryReserveGB

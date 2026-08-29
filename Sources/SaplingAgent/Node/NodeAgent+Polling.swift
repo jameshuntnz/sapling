@@ -33,10 +33,13 @@ extension NodeAgent {
         // Discover work even while cordoned, so the UI still shows what is
         // waiting — just don't dispatch any of it.
         var stillQueued: [String: Set<String>] = [:]
+        var refusedRuns: [String: String] = [:]
         var discoveryError: (any Error)?
         for repo in await watchedRepos() {
             do {
-                stillQueued[repo] = try await discoverQueuedJobs(in: repo)
+                let found = try await discoverQueuedJobs(in: repo)
+                stillQueued[repo] = found.queued
+                refusedRuns.merge(found.refusedRuns) { existing, _ in existing }
             } catch {
                 // One unreachable repo shouldn't stop us polling the others,
                 // and a repo that didn't answer is simply left out of
@@ -44,6 +47,7 @@ extension NodeAgent {
                 discoveryError = error
             }
         }
+        await noteRefusedRuns(refusedRuns)
 
         // Runs even when discovery partly failed: a job GitHub cancelled is
         // holding a VM right now, and a flaky poll is no reason to leave it
@@ -55,15 +59,31 @@ extension NodeAgent {
         try await dispatchQueuedJobs()
     }
 
+    /// What one repository's poll turned up.
+    struct RepoPoll {
+        /// Job ids GitHub reported as queued in runs this node may run.
+        let queued: Set<String>
+        /// Runs refused on provenance, keyed `repo#runID` so a run is only
+        /// ever spoken about once, with the sentence to log for it.
+        let refusedRuns: [String: String]
+    }
+
     /// Record everything GitHub reports queued for one repo.
     ///
     /// - Parameter repo: The repository to poll.
-    /// - Returns: The ids GitHub reported as queued, which is also the
-    ///   evidence that anything *not* in it has stopped waiting.
+    /// - Returns: The ids GitHub reported as queued — which is also the
+    ///   evidence that anything *not* in it has stopped waiting — and the runs
+    ///   skipped because their code did not come from `repo`.
     /// - Throws: If GitHub cannot be reached, or the store cannot be written.
-    private func discoverQueuedJobs(in repo: String) async throws -> Set<String> {
+    private func discoverQueuedJobs(in repo: String) async throws -> RepoPoll {
         var seen: Set<String> = []
-        for job in try await github.queuedJobs(repo: repo) {
+        let work = try await github.queuedWork(repo: repo)
+        let refused = Dictionary(
+            uniqueKeysWithValues: work.refusedRuns.map {
+                ("\(repo)#\($0.id)", "not running \(repo) run \($0.id): \($0.reason)")
+            })
+
+        for job in work.jobs {
             seen.insert(String(job.id))
             guard let platform = platform(matching: job.labels) else { continue }
 
@@ -115,7 +135,39 @@ extension NodeAgent {
                 break
             }
         }
-        return seen
+        return RepoPoll(queued: seen, refusedRuns: refused)
+    }
+
+    /// Says once, per run, that a run was refused on where its code came from.
+    ///
+    /// Nothing is recorded against the job table and nothing is sent to GitHub.
+    /// A refused run is not this node's work — filing thousands of a public
+    /// repository's fork pull requests as failed jobs would bury the real ones
+    /// — and cancelling is a whole-run operation, so declining a fork's job
+    /// would also kill the GitHub-hosted jobs beside it in a contributor's
+    /// pull request. The consequence, stated because it is invisible
+    /// otherwise: a fork's job that asked for this node's labels sits queued on
+    /// GitHub until GitHub's own timeout. `ForkPolicy` explains the GitHub-side
+    /// setting that stops it being queued at all.
+    ///
+    /// - Parameter refused: Every run refused this cycle, keyed `repo#runID`.
+    func noteRefusedRuns(_ refused: [String: String]) async {
+        var newlyRefused = 0
+        for (key, message) in refused.sorted(by: { $0.key < $1.key })
+        where !refusedForkRuns.contains(key) {
+            Log.warn(message)
+            newlyRefused += 1
+        }
+        // Replaced rather than accumulated, so the set stays bounded by what
+        // GitHub currently has queued instead of growing for the life of the
+        // daemon. A run that leaves the queue and comes back is worth a second
+        // line anyway.
+        refusedForkRuns = Set(refused.keys)
+
+        guard newlyRefused > 0 else { return }
+        forkRunsRefused += newlyRefused
+        try? await store.setState(
+            SaplingStore.StateKey.forkRunsRefused, String(forkRunsRefused))
     }
 
     /// Records a job this node can never run, and tells GitHub if it safely can.

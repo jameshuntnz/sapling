@@ -19,7 +19,7 @@ Single-node today. The control plane, the `nodes` table, and the enrollment endp
 
 ## What it explicitly does not do
 
-- **Public repos.** Sapling assumes trusted job code. A public repo can be made to run fork-PR code, which breaks that assumption — the daemon logs a loud warning at startup if you point it at one. Private repos only.
+- **Fork builds.** A workflow run is only ever run when its code came from the repository being watched. Fork pull requests are refused — on public and private repos alike, with no setting to turn it off, because nothing here sandboxes against adversarial job code. Public repos are supported on that basis; see [Public repositories](#public-repositories).
 - **Multi-tenancy.** Access control is "you're on my tailnet." There is no user model.
 - **Windows.** Out of scope.
 
@@ -175,6 +175,8 @@ poll_interval_seconds = 30
 # After 3 failed attempts the node gives up on a job. GitHub has no per-job
 # cancel, so telling it means cancelling the whole run — siblings included.
 cancel_run_when_exhausted = false
+# Let discovery watch public repos too. Fork PRs are refused either way.
+allow_public_repos = false
 
 [macos]
 enabled = true
@@ -260,11 +262,11 @@ takes effect without a restart. If GitHub is unreachable the last known list is
 kept — a node that quietly stopped watching everything is indistinguishable
 from one with no queued work.
 
-**Public repositories are never discovered this way.** Sapling does not sandbox
-against adversarial job code, so a public repo arriving through an installation
-nobody re-read is exactly the accident worth preventing; they are logged and
-skipped. Naming one in `github.repos` still works, with a warning — naming it
-is a decision, inheriting it is not.
+**Public repositories are not discovered this way unless you ask.** They are
+logged and skipped until `allow_public_repos = true`; naming one in
+`github.repos` takes just that one. Inheriting a repository through an
+installation nobody re-read is not a decision, and this keeps it from being
+treated as one. It is not the safety boundary, though — see below.
 
 Empty is only meaningful under App auth. A PAT has no installation to
 enumerate — it reaches every repository its owner can see — so `repos` must be
@@ -330,14 +332,55 @@ than letting the job fail with an elf loader error that mentions neither.
 Two things worth knowing before enabling this:
 
 - **A repository's Dockerfile executes on the node**, at build time, outside
-  the job container. That is consistent with Sapling assuming trusted job code
-  and refusing public repos, but it is a wider grant than running a job.
-  `build_images = false` declines it.
+  the job container. The definition is read at the job's own commit, and only
+  commits from the watched repository are ever run, so the trust is the same as
+  running a job — granted more widely. `build_images = false` declines it, and
+  on a public repository that is worth a second thought: whoever can push can
+  run a build step as the daemon.
 - **A changed Dockerfile blocks the next job** that asks for it, for as long as
   the build takes. Subsequent jobs hit the cache.
 
 Unused built images are pruned after 30 days, by reference rather than age — an
 image a job still points at is kept however old it is.
+
+## Public repositories
+
+Supported, on one condition that cannot be configured away: **a workflow run is
+only run when its code came from the repository being watched.** Fork pull
+requests are refused, on every repository, public or private.
+
+The test is the run's `head_repository.full_name` against the watched repo —
+deliberately not GitHub's `head_repository.fork` flag, which says the head repo
+is *itself* a fork of something and is therefore true of every branch push in a
+repository you maintain as a fork of an upstream project. Identity is the
+question; ancestry is not. A run whose provenance GitHub does not report — it
+returns a null head repository once the fork behind a PR is deleted — is
+refused too. Only a positive match admits.
+
+That one rule covers `pull_request_target`, `workflow_run` and `issue_comment`
+without naming any of them: a run originating in a fork reports the fork as its
+head repository under all of them.
+
+It is applied to the **run**, before its jobs are ever fetched. That is not an
+optimisation, though it does save a request per fork PR: the pipeline
+downstream reads a repository's image definitions at the job's commit and
+builds them on the node, outside any container, so refusing any later would be
+refusing after a fork's Dockerfile had already run.
+
+Two things follow that are worth knowing before you point a node at a public
+repo:
+
+- **Set "Require approval for all outside collaborators"** on the repository's
+  Actions settings. That is the control that matters. Sapling can only decline
+  a fork's job, not withdraw it — GitHub has no per-job cancel, and cancelling
+  the run would take down the GitHub-hosted jobs sitting beside ours in a
+  contributor's PR — so a refused job waits out GitHub's own timeout. With
+  approval required, it never reaches the queue. Refusals are counted in
+  `sapling status` and logged once per run, never filed as failed jobs.
+- **The repo's own commits still run unsandboxed.** Refusing forks closes the
+  path that made public repos dangerous and closes nothing else. Push access to
+  a watched repository is push access to this Mac; the daemon says so at
+  startup for any public repo it watches.
 
 ## Open decisions
 
