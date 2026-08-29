@@ -47,6 +47,10 @@ struct ServerOptions: ParsableArguments {
 /// Report a failure the way a CLI should: a plain message on stderr and a
 /// non-zero exit, not a Swift error dump.
 func fail(_ message: String) -> Never {
+    // Flush first: stdout is block-buffered when it isn't a terminal, so
+    // `sapling restart > log 2>&1` would otherwise print the error above the
+    // lines explaining how it got there.
+    fflush(stdout)
     FileHandle.standardError.write(Data("error: \(message)\n".utf8))
     Foundation.exit(1)
 }

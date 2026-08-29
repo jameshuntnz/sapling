@@ -230,6 +230,21 @@ struct APITests {
         }
     }
 
+    /// The restart endpoint exists so the CLI needs no `sudo`, and a control
+    /// plane with no agent is not a daemon launchd is holding — so it refuses
+    /// rather than kickstarting whatever else answers to that label.
+    ///
+    /// Also the guard that keeps this suite from restarting the developer's
+    /// own daemon: nothing here may reach `launchctl`.
+    @Test("refuses to restart when there is no daemon behind this control plane")
+    func restartWithoutAgent() async throws {
+        try await withServer { _, client in
+            let response = try await client.restartDaemon()
+            #expect(!response.restarting)
+            #expect(response.error?.contains("no node agent") == true)
+        }
+    }
+
     /// A control plane with no agent — `sapling demo` — has no live
     /// configuration to swap, and says so rather than reporting a no-op.
     @Test("refuses a reload when nothing is holding a live configuration")

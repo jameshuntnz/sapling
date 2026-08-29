@@ -61,7 +61,7 @@ extension Config {
     static func printRestartChanges(_ heading: String, _ changes: [ConfigChange]) {
         guard !changes.isEmpty else { return }
         printChanges(heading, changes)
-        print(Style.dim("  `sudo sapling restart --wait` applies these once the running jobs finish"))
+        print(Style.dim("  `sapling restart --wait` applies these once the running jobs finish"))
     }
 
     /// Prints configuration advisories, the same ones `sapling doctor` shows.

@@ -269,15 +269,20 @@ same edit while telling you where it kept it.
 Then apply the restart-only half:
 
 ```bash
-sudo sapling restart              # refused while a job is running
-sudo sapling restart --wait       # drains first, then restarts
+sapling restart                   # refused while a job is running — and no sudo
+sapling restart --wait            # drains first, then restarts
 ```
 
-**Expect:** the refusal names the running job count; `--wait` reports the drain,
-waits, restarts, and then prints the node back as **online** — startup
-re-registers it, so a drained node does not stay drained. On a machine with no
-daemon installed, `sudo sapling restart` should say to run `sapling install`
-rather than passing launchd's "Could not find service" through.
+**Expect:** no password prompt — the daemon restarts itself, the same way
+`sapling update` does. The refusal names the running job count; `--wait` reports
+the drain, waits, restarts, and then prints the node back as **online** —
+startup re-registers it, so a drained node does not stay drained.
+
+Then kill the daemon outright (`sudo launchctl bootout system/dev.sapling.daemon`)
+and run `sapling restart` again. **Expect:** it says nothing is answering and
+asks for sudo, because launchd is the only route left. On a machine with no
+daemon installed at all, `sudo sapling restart` should say to run
+`sapling install` rather than passing launchd's "Could not find service" through.
 
 ---
 

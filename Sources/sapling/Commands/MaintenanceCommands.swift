@@ -23,7 +23,14 @@ struct Upgrade: AsyncParsableCommand {
     }
 }
 
-/// `sapling restart` — bounce the daemon through launchd.
+/// `sapling restart` — ask the daemon to restart itself, or start it if it is
+/// not there.
+///
+/// No `sudo` in the normal case: the daemon runs as root under launchd, so it
+/// can kickstart itself, exactly as `sapling update` has it do after swapping
+/// the binary. Root is only needed for the case the API cannot cover — a
+/// daemon that has crashed or was never started, where there is nothing to ask
+/// and launchd has to be told directly.
 ///
 /// Deliberately has no `--server`: launchd is local, so this always acts on
 /// this Mac's daemon. A workstation whose `client.toml` points at the node
@@ -32,6 +39,10 @@ struct Restart: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Restart the daemon on this machine.",
         discussion: """
+            No sudo while the daemon is answering — it is already root, so it \
+            restarts itself. A daemon that is down has to be started through \
+            launchd instead, and that does need sudo.
+
             A restart fails every job that is running: the VM or container is reaped \
             with the process that owns it, and GitHub is told the job failed. So it \
             is refused while the node is busy unless you say what to do about that — \
@@ -52,20 +63,56 @@ struct Restart: AsyncParsableCommand {
     var waitTimeout = 3600
 
     func run() async throws {
-        guard InstallContext.isRoot else {
-            fail("restarting the daemon needs root — re-run with sudo")
-        }
         let client = SaplingClient(baseURL: ServerEndpoint.local)
 
-        if let running = await Self.runningJobs(client) {
-            try await handleRunningJobs(running, client: client)
-        } else {
-            // Nothing answering is the normal case for a daemon that has
-            // crashed or was never started — exactly when someone reaches for
-            // a restart, so it is a note rather than a refusal.
-            print(Style.dim("no daemon answering on \(ServerEndpoint.local.absoluteString) — starting it"))
+        guard let running = await Self.runningJobs(client) else {
+            // Nothing answering is a daemon that crashed or was never started
+            // — exactly when someone reaches for a restart, and the one case
+            // the API cannot serve, so launchd is asked directly.
+            print(
+                Style.dim(
+                    "no daemon answering on \(ServerEndpoint.local.absoluteString) — starting it through launchd"
+                ))
+            try await Self.kickstartLocally()
+            await Self.waitForDaemon(client)
+            return
         }
 
+        try await handleRunningJobs(running, client: client)
+        try await askDaemonToRestart(client)
+        await Self.waitForDaemon(client)
+    }
+
+    /// Ask the running daemon to restart itself, falling back to launchd.
+    private func askDaemonToRestart(_ client: SaplingClient) async throws {
+        do {
+            let response = try await client.restartDaemon(force: force)
+            if let error = response.error {
+                // It is up but cannot kickstart itself — a daemon started by
+                // hand rather than by launchd, most likely. Say so, then do it
+                // the way that works.
+                print("\(Style.yellow("the daemon cannot restart itself"))  \(error)")
+                try await Self.kickstartLocally()
+                return
+            }
+            print(Style.green(response.message))
+        } catch let error as ClientError where error.statusCode == nil {
+            // The reply raced the process going down. That is the restart, not
+            // a failure — `waitForDaemon` settles which.
+            print(Style.green("restarting"))
+        } catch {
+            print("\(Style.yellow("could not ask the daemon to restart"))  \(error.localizedDescription)")
+            try await Self.kickstartLocally()
+        }
+    }
+
+    /// Tell launchd directly, which is the path that needs root.
+    static func kickstartLocally() async throws {
+        guard InstallContext.isRoot else {
+            fail(
+                "the daemon can't be asked to restart itself, so launchd has to be told directly "
+                    + "— re-run with sudo")
+        }
         let result: CommandResult
         do {
             result = try await LaunchControl.restart()
@@ -76,7 +123,6 @@ struct Restart: AsyncParsableCommand {
             fail(LaunchControl.explain(result))
         }
         print(Style.green("restarted \(SaplingPaths.launchDaemonLabel)"))
-        await Self.waitForDaemon(client)
     }
 
     /// Refuse, wait, or warn — the node is busy and something has to give.

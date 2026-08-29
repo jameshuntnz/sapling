@@ -180,6 +180,20 @@ public struct SaplingClient: Sendable {
         try await send("POST", "api/v1/config/reload", as: ConfigReloadResponse.self)
     }
 
+    /// Asks the daemon to restart itself through launchd.
+    ///
+    /// Needs no `sudo`: the daemon is already root. It replies before going
+    /// down, so the next request fails briefly while it comes back — and a
+    /// dropped connection immediately after this call is the restart, not a
+    /// fault.
+    ///
+    /// - Parameter force: Restart even while jobs are running.
+    /// - Returns: Whether it is restarting, or why it is not.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func restartDaemon(force: Bool = false) async throws -> RestartResponse {
+        try await send("POST", "api/v1/restart?force=\(force)", as: RestartResponse.self)
+    }
+
     /// Requests a single-use token for enrolling another node.
     public func joinToken() async throws -> JoinTokenResponse {
         try await send("POST", "api/v1/nodes/join-token", as: JoinTokenResponse.self)
