@@ -139,12 +139,13 @@ struct ControlPlane: Sendable {
         response.requestGB = job.memoryGB
         response.requestFromLabel = RunnerImageSelector.parse(job.labels).memoryGB != nil
 
-        // Advice comes from this job's own history, not the live run: one run
-        // is an anecdote, and the question being answered — is this label the
-        // right size — is about the shape of many.
+        // Advice comes from this job's own history, not the live run: one kill
+        // can be a bad day on a loaded node, and the question being answered —
+        // is this label the right size — is about the shape of many.
         if let request = job.memoryGB, let name = job.name {
-            let peaks = (try? await store.recentPeakMemory(repo: job.repo, name: name)) ?? []
-            response.advice = MemorySizing.advise(requestGB: request, peaks: peaks)
+            let reasons = (try? await store.recentExitReasons(repo: job.repo, name: name)) ?? []
+            response.advice = MemorySizing.advise(
+                requestGB: request, outcomes: reasons.map(FailureKind.of))
         }
         return response
     }

@@ -3,78 +3,54 @@ import Testing
 
 @testable import SaplingCore
 
-/// A `mem:` label is a number somebody guessed; this reads it off history.
+/// Advice about a `mem:` label, from the one signal that means what it says.
 ///
-/// The 6GB the Android build asks for was found by running it by hand in
-/// containers on the node at 4GB and 6GB and reading `memory.peak`. Sapling
-/// already measures that on every run, so the second time anyone asks the
-/// question it should be a readout rather than an afternoon.
+/// The obvious signal does not support the obvious advice. A guest spends
+/// spare memory on page cache and never returns it, so the host's footprint
+/// climbs to whatever the job was given whatever it needed — measured on this
+/// node, an Android build reserving 6GB peaked at 6.16GB and passed, and a
+/// macOS job reserving 6GB peaked at 6.02GB and passed. Warning on a near-full
+/// peak would warn on every healthy job.
 @Suite("Memory sizing advice")
 struct MemorySizingTests {
-    func gb(_ value: Double) -> Int64 { Int64(value * 1_073_741_824) }
-
-    /// One run is an anecdote and two is a coincidence.
-    ///
-    /// A build's peak moves with what it happens to compile, and advising a
-    /// smaller label off a single quiet run causes the OOM it meant to prevent.
+    /// One kill can be a bad day on a loaded node.
     @Test("says nothing until there is enough history to mean it")
     func needsHistory() {
-        #expect(MemorySizing.advise(requestGB: 8, peaks: [gb(1)]) == nil)
-        #expect(MemorySizing.advise(requestGB: 8, peaks: [gb(1), gb(1)]) == nil)
-        #expect(MemorySizing.advise(requestGB: 8, peaks: [gb(1), gb(1), gb(1)]) != nil)
+        #expect(MemorySizing.advise(requestGB: 4, outcomes: [.memoryKill]) == nil)
+        #expect(MemorySizing.advise(requestGB: 4, outcomes: [.memoryKill, .memoryKill]) == nil)
+        #expect(
+            MemorySizing.advise(requestGB: 4, outcomes: [.memoryKill, .memoryKill, .build]) != nil)
     }
 
-    @Test("a job reserving far more than it uses is told what to reserve")
-    func oversized() {
-        let advice = MemorySizing.advise(requestGB: 8, peaks: [gb(2.0), gb(2.4), gb(1.9)])
-        guard case .oversized(let request, let peak, let suggest, let runs) = advice else {
-            Issue.record("2.4GB peak against an 8GB request is oversized: \(String(describing: advice))")
+    /// The failure this whole area exists to make legible, turned into a fix.
+    @Test("a job killed for memory is told to raise its label")
+    func killedBefore() {
+        let advice = MemorySizing.advise(
+            requestGB: 4, outcomes: [.memoryKill, .build, .memoryKill, .build])
+        guard case .killedBefore(let request, let kills, let runs) = advice else {
+            Issue.record("two kills in four runs deserves advice: \(String(describing: advice))")
             return
         }
-        #expect(request == 8)
-        #expect(peak == 3)  // rounded up from 2.4
-        #expect(suggest == 4)  // 3 * 1.3, rounded up
-        #expect(runs == 3)
-        #expect(advice?.summary.contains("mem:4") == true)
-    }
-
-    /// The peaks are a floor, not a ceiling — the next run may compile more.
-    @Test("the suggestion keeps headroom above the worst run seen")
-    func keepsHeadroom() {
-        let advice = MemorySizing.advise(requestGB: 12, peaks: [gb(4), gb(4), gb(4)])
-        guard case .oversized(_, _, let suggest, _) = advice else {
-            Issue.record("expected advice: \(String(describing: advice))")
-            return
-        }
-        #expect(suggest > 4)
-    }
-
-    /// The failure mode that started all of this, caught before it happens.
-    @Test("a job running close to its limit is warned, not trimmed")
-    func tight() {
-        let advice = MemorySizing.advise(requestGB: 6, peaks: [gb(5.6), gb(5.8), gb(5.5)])
-        guard case .tight(let request, let peak, _) = advice else {
-            Issue.record("5.8GB against 6GB is at risk: \(String(describing: advice))")
-            return
-        }
-        #expect(request == 6)
-        #expect(peak == 6)
+        #expect(request == 4)
+        #expect(kills == 2)
+        #expect(runs == 4)
+        #expect(advice?.summary.contains("mem:") == true)
         #expect(advice?.isWarning == true)
-        #expect(advice?.summary.contains("OOM") == true)
     }
 
-    /// Advice nobody would act on is noise on a machine rationing whole GB.
-    @Test("a saving too small to matter is not mentioned")
-    func staysQuietWhenTheSavingIsTrivial() {
-        // 2GB peak, 4GB request: suggesting 3GB frees one gigabyte.
-        #expect(MemorySizing.advise(requestGB: 4, peaks: [gb(2), gb(2), gb(2)]) == nil)
+    /// A job that has never been killed needs no opinion, however close to its
+    /// limit it appears to run — appearing close is the resting state.
+    @Test("a job that has never been killed is left alone")
+    func healthyJobIsSilent() {
+        #expect(MemorySizing.advise(requestGB: 6, outcomes: [.build, .build, .build]) == nil)
+        #expect(MemorySizing.advise(requestGB: 6, outcomes: []) == nil)
     }
 
-    @Test("a job with no measurements gets no opinion")
-    func noMeasurements() {
-        #expect(MemorySizing.advise(requestGB: 8, peaks: []) == nil)
-        #expect(MemorySizing.advise(requestGB: 0, peaks: [gb(1), gb(1), gb(1)]) == nil)
-        #expect(MemorySizing.advise(requestGB: 8, peaks: [0, 0, 0]) == nil)
+    @Test("an unsized job gets no opinion")
+    func unsized() {
+        #expect(
+            MemorySizing.advise(requestGB: 0, outcomes: [.memoryKill, .memoryKill, .memoryKill])
+                == nil)
     }
 
     // MARK: - Telling failures apart

@@ -1,82 +1,61 @@
 import Foundation
 
-/// What a job's observed peaks say about the memory it asks for.
+/// What a job's history says about the memory it asks for.
 ///
-/// The point of the whole exercise. A `mem:` label is a number somebody had to
-/// guess, and guessing it wrong is expensive in both directions: too low and
-/// the guest's OOM killer takes the build with no message naming memory, too
-/// high and the job holds budget nobody else can use. Sapling already measures
-/// what each environment actually reaches, so the number can be read off
-/// history instead of guessed.
+/// Deliberately narrow, because the obvious signal does not support the
+/// obvious advice. `JobResourceSample.memoryFootprint` is what the *host* has
+/// committed to an environment, and a guest spends its spare memory on page
+/// cache and never hands it back — so the figure climbs to whatever the job
+/// was given and stays there, whatever the job actually needed. Measured on
+/// this node: an Android build reserving 6GB peaked at 6.16GB and passed, and
+/// a macOS job reserving 6GB peaked at 6.02GB and passed. Reading either as
+/// "nearly out of memory" would warn on every healthy job, and reading a low
+/// peak as "oversized" would never fire at all.
 ///
-/// This is not hypothetical tuning. The 6GB the Android build asks for was
-/// found by running it by hand in containers on the node at 4GB and 6GB and
-/// reading `memory.peak` — work this makes unnecessary next time.
+/// What is left is the signal that means exactly one thing: the guest kernel's
+/// OOM counter. A job that was killed for memory was too small, and no
+/// interpretation is required.
+///
+/// Advising a job *down* needs the guest's own anonymous memory rather than
+/// the host's footprint — `memory.stat`'s `anon` inside the container, which
+/// the OOM watcher is already positioned to read. Until that exists this says
+/// nothing about oversizing, because it has nothing to say.
 public enum MemoryAdvice: Codable, Sendable, Hashable {
-    /// Reserving far more than it has ever used.
-    case oversized(requestGB: Int, peakGB: Int, suggestGB: Int, runs: Int)
-    /// Running close enough to its limit to be at risk of an OOM kill.
-    case tight(requestGB: Int, peakGB: Int, runs: Int)
+    /// Killed for memory in recent runs at this size.
+    case killedBefore(requestGB: Int, kills: Int, runs: Int)
 
     /// One line, phrased as something to do rather than something to know.
     public var summary: String {
         switch self {
-        case .oversized(let request, let peak, let suggest, let runs):
-            "peaked at \(peak)GB across \(runs) runs but reserves \(request)GB — "
-                + "`mem:\(suggest)` would free \(request - suggest)GB for other jobs"
-        case .tight(let request, let peak, let runs):
-            "peaked at \(peak)GB against a \(request)GB limit across \(runs) runs — "
-                + "close enough to risk an OOM kill; consider raising it"
+        case .killedBefore(let request, let kills, let runs):
+            "killed for memory in \(kills) of the last \(runs) runs at \(request)GB — "
+                + "raise its `mem:` label"
         }
     }
 
     /// Whether this is a warning rather than an efficiency note.
-    public var isWarning: Bool {
-        if case .tight = self { return true }
-        return false
-    }
+    public var isWarning: Bool { true }
 }
 
-/// Turns observed peaks into advice about a job's memory request.
+/// Turns a job's history into advice about the memory it asks for.
 public enum MemorySizing {
     /// Fewest runs before saying anything.
     ///
-    /// One run is an anecdote and two is a coincidence. A build's peak moves
-    /// with what it happens to compile, and advising a smaller label off a
-    /// single quiet run is how you cause the OOM you were trying to prevent.
+    /// One kill can be a bad day on a loaded node. A pattern is what justifies
+    /// telling somebody to change a number in their workflow.
     public static let minimumRuns = 3
 
-    /// Headroom kept above the observed peak, as a multiplier.
-    ///
-    /// Peaks are a floor, not a ceiling: the next run may pull a larger
-    /// dependency or compile more. This buys room for that without giving back
-    /// the whole saving.
-    public static let headroom = 1.3
-
-    /// Fraction of its request a job must exceed to be called tight.
-    public static let tightRatio = 0.9
-
-    /// Advice for a job, or nil when its request looks right or unproven.
+    /// Advice for a job, or nil when its history says nothing useful.
     ///
     /// - Parameters:
     ///   - requestGB: What the job reserves.
-    ///   - peaks: Observed peak memory, in bytes, one per completed run.
+    ///   - outcomes: Why recent runs of this job ended, most recent first.
     /// - Returns: Advice worth showing, or nil.
-    public static func advise(requestGB: Int, peaks: [Int64]) -> MemoryAdvice? {
-        guard requestGB > 0, peaks.count >= minimumRuns else { return nil }
-        guard let worst = peaks.max(), worst > 0 else { return nil }
-
-        let peakGB = Int((Double(worst) / 1_073_741_824).rounded(.up))
-        if Double(peakGB) >= Double(requestGB) * tightRatio {
-            return .tight(requestGB: requestGB, peakGB: peakGB, runs: peaks.count)
-        }
-
-        let suggested = max(1, Int((Double(peakGB) * headroom).rounded(.up)))
-        // Only worth saying when acting on it frees something. A one-gigabyte
-        // saving is noise on a machine that rations in whole gigabytes.
-        guard requestGB - suggested >= 2 else { return nil }
-        return .oversized(
-            requestGB: requestGB, peakGB: peakGB, suggestGB: suggested, runs: peaks.count)
+    public static func advise(requestGB: Int, outcomes: [FailureKind]) -> MemoryAdvice? {
+        guard requestGB > 0, outcomes.count >= minimumRuns else { return nil }
+        let kills = outcomes.filter { $0 == .memoryKill }.count
+        guard kills > 0 else { return nil }
+        return .killedBefore(requestGB: requestGB, kills: kills, runs: outcomes.count)
     }
 }
 
