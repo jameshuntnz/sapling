@@ -192,6 +192,7 @@ extension NodeAgent {
         let task = Task { [weak self] in
             guard let self else { return }
             await self.execute(sized)
+            await self.recordPeakMemory(jobID: job.id, platform: job.platform)
             await self.finishTracking(jobID: job.id)
         }
         runningJobs[job.id] = task
@@ -199,5 +200,17 @@ extension NodeAgent {
 
     func finishTracking(jobID: String) {
         runningJobs[jobID] = nil
+    }
+
+    /// Saves the high-water mark of a finished job's environment.
+    ///
+    /// Written at the end rather than sampled into the database throughout:
+    /// the samples are a window worth ten minutes and the peak is the only part
+    /// anyone asks about afterwards, when the question is whether the job's
+    /// `mem:` label is the right size.
+    func recordPeakMemory(jobID: String, platform: JobPlatform) async {
+        let resources = await jobStats.resources(jobID: jobID, platform: platform)
+        guard let peak = resources.peak, peak.memoryFootprint > 0 else { return }
+        try? await store.setJobPeakMemory(id: jobID, bytes: peak.memoryFootprint)
     }
 }

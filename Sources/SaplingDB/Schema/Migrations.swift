@@ -87,6 +87,16 @@ enum SaplingMigrations {
             }
         }
 
+        // The peak is the part of a job's resource history worth keeping. The
+        // samples are a ten-minute window held in memory and lost on restart;
+        // the high-water mark is what answers "is this label the right size",
+        // and that question is asked long after the job is gone.
+        migrator.registerMigration("v5_job_peak_memory") { db in
+            try db.alter(table: "jobs") { t in
+                t.add(column: "peak_memory_bytes", .integer)
+            }
+        }
+
         return migrator
     }
 }

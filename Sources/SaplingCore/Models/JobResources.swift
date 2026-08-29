@@ -117,6 +117,16 @@ public struct JobResourcesResponse: Codable, Sendable {
     public var samples: [JobResourceSample]
     /// Gap between samples, in seconds.
     public var intervalSeconds: Int
+    /// Memory this job reserved from the node's budget, in GB.
+    ///
+    /// The request, as against `limits` — what the environment was actually
+    /// given. They are the same today, and separating them here is what lets
+    /// the panel say where the number came from and whether it was earned.
+    public var requestGB: Int?
+    /// Whether that request came from a `mem:` label rather than the default.
+    public var requestFromLabel: Bool
+    /// What this job's history says about its request, when history says anything.
+    public var advice: MemoryAdvice?
 
     /// Creates a resource report.
     public init(
@@ -127,7 +137,10 @@ public struct JobResourcesResponse: Codable, Sendable {
         limits: JobResourceLimits = JobResourceLimits(),
         peak: JobResourceSample? = nil,
         samples: [JobResourceSample] = [],
-        intervalSeconds: Int = 5
+        intervalSeconds: Int = 5,
+        requestGB: Int? = nil,
+        requestFromLabel: Bool = false,
+        advice: MemoryAdvice? = nil
     ) {
         self.jobID = jobID
         self.platform = platform
@@ -137,6 +150,9 @@ public struct JobResourcesResponse: Codable, Sendable {
         self.peak = peak
         self.samples = samples
         self.intervalSeconds = intervalSeconds
+        self.requestGB = requestGB
+        self.requestFromLabel = requestFromLabel
+        self.advice = advice
     }
 
     /// The most recent sample, if there is one.

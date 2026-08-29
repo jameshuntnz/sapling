@@ -75,9 +75,19 @@ struct JobDetailView: View {
             }
 
             if let reason = job.exitReason {
+                let kind = FailureKind.of(reason: reason)
+                // Named when it is not the build's fault. A memory kill and a
+                // refusal both arrive as a failed job with a reason, and both
+                // send someone to the wrong place unless the difference is
+                // stated: one is a setting to change, not code to fix.
+                if let label = kind.label {
+                    Label(label, systemImage: kind.symbol)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.orange)
+                }
                 Text(reason)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(kind == .build ? .red : .secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }

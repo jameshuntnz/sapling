@@ -25,8 +25,51 @@ struct JobResourcesView: View {
                 cpu(sample)
                 memory(sample)
                 disk(sample)
+                request
+                adviceLine
                 footnote
             }
+        }
+    }
+
+    // MARK: - What was asked for, and whether it was right
+
+    /// The reservation, and where the number came from.
+    ///
+    /// Shown apart from the meters because it is a different kind of fact: the
+    /// meters say what the environment used, this says what the scheduler set
+    /// aside for it and on whose authority. A label and a default look
+    /// identical in the resulting limit and are worth telling apart when
+    /// deciding which to change.
+    @ViewBuilder
+    private var request: some View {
+        if let requestGB = resources.requestGB {
+            HStack(spacing: 6) {
+                Text("Reserved")
+                    .font(.system(.caption, design: .rounded).weight(.medium))
+                    .frame(width: 52, alignment: .leading)
+                Text("\(requestGB)GB")
+                    .font(.caption2.monospacedDigit())
+                Text(resources.requestFromLabel ? "mem: label" : "platform default")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+        }
+    }
+
+    /// What this job's history says about that reservation.
+    ///
+    /// The payoff for sampling at all. A `mem:` label is a number somebody
+    /// guessed, and this is the same number read off what the job has actually
+    /// done — which is how it should have been arrived at in the first place.
+    @ViewBuilder
+    private var adviceLine: some View {
+        if let advice = resources.advice {
+            Label(advice.summary, systemImage: advice.isWarning ? "exclamationmark.triangle" : "lightbulb")
+                .font(.caption2)
+                .foregroundStyle(advice.isWarning ? .orange : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

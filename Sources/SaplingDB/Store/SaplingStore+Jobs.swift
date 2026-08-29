@@ -101,6 +101,43 @@ extension SaplingStore {
         }
     }
 
+    /// Records the most memory a job's environment ever held, in bytes.
+    public func setJobPeakMemory(id: String, bytes: Int64) async throws {
+        try await writer.write { db in
+            guard var record = try JobRecord.fetchOne(db, key: id) else { return }
+            record.peakMemoryBytes = bytes
+            try record.update(db)
+        }
+    }
+
+    /// Peak memory from recent completed runs of the same job, in bytes.
+    ///
+    /// Keyed on repository and job name, which is what a `mem:` label is
+    /// attached to — the same workflow job across runs, rather than the same
+    /// run id, which never repeats.
+    ///
+    /// - Parameters:
+    ///   - repo: Repository in `owner/repo` form.
+    ///   - name: The job's name from the workflow file.
+    ///   - limit: How many recent runs to consider.
+    /// - Returns: Peaks, most recent first.
+    /// - Throws: If the database cannot be read.
+    public func recentPeakMemory(repo: String, name: String, limit: Int = 10) async throws
+        -> [Int64]
+    {
+        try await writer.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT peak_memory_bytes FROM jobs
+                    WHERE repo = ? AND name = ? AND peak_memory_bytes IS NOT NULL
+                    ORDER BY updated_at DESC LIMIT ?
+                    """,
+                arguments: [repo, name, limit]
+            ).compactMap { $0["peak_memory_bytes"] as Int64? }
+        }
+    }
+
     /// Records the image a job actually ran in.
     public func setJobImageRef(id: String, imageRef: String) async throws {
         try await writer.write { db in

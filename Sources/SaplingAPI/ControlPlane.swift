@@ -130,8 +130,23 @@ struct ControlPlane: Sendable {
     /// - Throws: If the store cannot be read.
     func jobResources(id: String, limit: Int?) async throws -> JobResourcesResponse? {
         guard let job = try await store.job(id: id) else { return nil }
-        guard let agent else { return JobResourcesResponse(jobID: id, platform: job.platform) }
-        return await agent.jobStats.resources(jobID: id, platform: job.platform, limit: limit)
+        var response = JobResourcesResponse(jobID: id, platform: job.platform)
+        if let agent {
+            response = await agent.jobStats.resources(
+                jobID: id, platform: job.platform, limit: limit)
+        }
+
+        response.requestGB = job.memoryGB
+        response.requestFromLabel = RunnerImageSelector.parse(job.labels).memoryGB != nil
+
+        // Advice comes from this job's own history, not the live run: one run
+        // is an anecdote, and the question being answered — is this label the
+        // right size — is about the shape of many.
+        if let request = job.memoryGB, let name = job.name {
+            let peaks = (try? await store.recentPeakMemory(repo: job.repo, name: name)) ?? []
+            response.advice = MemorySizing.advise(requestGB: request, peaks: peaks)
+        }
+        return response
     }
 
     func createJoinToken(controlPlaneURL: String) async throws -> JoinTokenResponse {
