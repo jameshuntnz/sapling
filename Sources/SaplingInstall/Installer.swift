@@ -229,9 +229,7 @@ public struct Installer: Sendable {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
         actions.append("installed \(source) -> \(target)")
 
-        _ = try? await ProcessRunner.run(
-            "launchctl", ["kickstart", "-k", "system/\(SaplingPaths.launchDaemonLabel)"],
-            timeout: .seconds(60))
+        _ = try? await LaunchControl.restart()
         actions.append("restarted \(SaplingPaths.launchDaemonLabel)")
         return actions
     }

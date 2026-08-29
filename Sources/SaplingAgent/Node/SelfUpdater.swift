@@ -195,8 +195,6 @@ public struct SelfUpdater: Sendable {
     /// `kickstart -k` kills and relaunches, so this process does not come
     /// back — launchd starts a fresh one from the replaced binary.
     func restart() async throws {
-        _ = try await ProcessRunner.run(
-            "launchctl", ["kickstart", "-k", "system/\(SaplingPaths.launchDaemonLabel)"],
-            timeout: .seconds(60))
+        _ = try await LaunchControl.restart()
     }
 }

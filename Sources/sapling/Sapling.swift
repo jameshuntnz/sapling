@@ -13,6 +13,7 @@ struct Sapling: AsyncParsableCommand {
             Install.self,
             Doctor.self,
             Upgrade.self,
+            Restart.self,
             Update.self,
             Uninstall.self,
             Status.self,

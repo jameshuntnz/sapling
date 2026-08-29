@@ -28,14 +28,25 @@ public enum ServerEndpoint {
         // Where the local daemon says it bound, which beats inferring it from
         // config — `bind = "tailscale"` resolves to an address only the daemon
         // knows.
+        return local
+    }
+
+    /// The daemon on *this* machine, ignoring any remote override.
+    ///
+    /// `resolve` honours `$SAPLING_SERVER` and `client.toml`, which is right
+    /// for every command that reads or controls a node over the API — and
+    /// wrong for the ones that act on this Mac's own daemon through launchd.
+    /// A workstation whose client config points at the node would otherwise
+    /// check the node's job count and restart the laptop.
+    public static var local: URL {
         if let published = try? String(contentsOf: SaplingPaths.endpointFile, encoding: .utf8),
             let url = normalize(published.trimmingCharacters(in: .whitespacesAndNewlines))
         {
             return url
         }
-        if let local = try? SaplingConfig.load() {
-            let host = local.server.bindMode == .tailscale ? "127.0.0.1" : local.server.bind
-            if let url = normalize("\(host):\(local.server.port)") { return url }
+        if let config = try? SaplingConfig.load() {
+            let host = config.server.bindMode == .tailscale ? "127.0.0.1" : config.server.bind
+            if let url = normalize("\(host):\(config.server.port)") { return url }
         }
         return loopback
     }

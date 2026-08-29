@@ -103,6 +103,7 @@ sapling update             Install the newest release (no sudo — the daemon do
 sapling install            Bootstrap this Mac. Safe to re-run.
 sapling doctor             Read-only health check of every dependency.
 sapling upgrade            Replace the installed binary, restart the daemon.
+sapling restart            Restart the daemon (sudo; refuses while jobs run).
 sapling uninstall          Remove the daemon (--purge also removes config and VMs).
 
 sapling serve              Run the control plane and node agent.
@@ -231,6 +232,9 @@ Applied
 Needs a daemon restart
   server.port                   8734 → 9001
 ```
+
+`sudo sapling restart` applies the rest, and `--wait` lets the running jobs
+finish first rather than failing them.
 
 The file is parsed and validated in full before any of it is applied, so a
 typo leaves the node exactly as it was. `sapling config show` says the same

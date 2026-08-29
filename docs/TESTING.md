@@ -266,6 +266,19 @@ Then break the file on purpose — an unclosed `[section` — and reload again.
 `sapling status` unchanged. `sapling config edit` should refuse to save the
 same edit while telling you where it kept it.
 
+Then apply the restart-only half:
+
+```bash
+sudo sapling restart              # refused while a job is running
+sudo sapling restart --wait       # drains first, then restarts
+```
+
+**Expect:** the refusal names the running job count; `--wait` reports the drain,
+waits, restarts, and then prints the node back as **online** — startup
+re-registers it, so a drained node does not stay drained. On a machine with no
+daemon installed, `sudo sapling restart` should say to run `sapling install`
+rather than passing launchd's "Could not find service" through.
+
 ---
 
 ## Known rough edges

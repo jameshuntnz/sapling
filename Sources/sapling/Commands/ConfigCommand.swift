@@ -49,8 +49,19 @@ extension Config {
         }
         print(response.reloaded ? Style.green(response.message) : Style.dim(response.message))
         printChanges("Applied", response.applied)
-        printChanges("Needs a daemon restart", response.pendingRestart)
+        printRestartChanges("Needs a daemon restart", response.pendingRestart)
         printWarnings(response.warnings)
+    }
+
+    /// Prints restart-only changes, with the command that applies them.
+    ///
+    /// The list is only half an answer without it: knowing a field needs a
+    /// restart is not knowing that `sapling restart` will wait for the running
+    /// jobs if you ask it to.
+    static func printRestartChanges(_ heading: String, _ changes: [ConfigChange]) {
+        guard !changes.isEmpty else { return }
+        printChanges(heading, changes)
+        print(Style.dim("  `sudo sapling restart --wait` applies these once the running jobs finish"))
     }
 
     /// Prints configuration advisories, the same ones `sapling doctor` shows.
@@ -145,7 +156,7 @@ extension Config {
                 print("\(Style.red("config file"))  \(fileError)")
             }
             Config.printChanges("Waiting for a reload", response.pendingReload)
-            Config.printChanges("Waiting for a restart", response.pendingRestart)
+            Config.printRestartChanges("Waiting for a restart", response.pendingRestart)
             Config.printWarnings(response.warnings)
         }
     }
