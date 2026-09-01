@@ -12,14 +12,19 @@ extension EnvironmentDependentTests {
     struct PublishedEndpointTests {
         /// With `bind = "tailscale"` the daemon listens on an address only it
         /// can resolve, so it publishes that address for local clients.
+        ///
+        /// The address is the first in Tailscale's 100.64.0.0/10 range rather
+        /// than any node's real one: nothing here resolves it, and a real
+        /// address in a public repository is a detail about someone's tailnet
+        /// that the test does not need.
         @Test("prefers the address the local daemon published")
         func prefersPublishedEndpoint() async throws {
             try await TemporaryHome.run { home in
                 try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-                try "http://100.66.217.76:8734".write(
+                try "http://100.64.0.1:8734".write(
                     to: SaplingPaths.endpointFile, atomically: true, encoding: .utf8)
 
-                #expect(ServerEndpoint.resolve().absoluteString == "http://100.66.217.76:8734")
+                #expect(ServerEndpoint.resolve().absoluteString == "http://100.64.0.1:8734")
 
                 // An explicit address still outranks it.
                 #expect(
