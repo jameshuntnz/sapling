@@ -12,9 +12,10 @@ on:
         required: true
         default: "192.168.0.1"
       tailnet_target:
-        description: "A tailnet address that jobs must NOT reach"
+        # No default: this is the node's own Tailscale address, which differs
+        # per tailnet and is not something to bake into a public repository.
+        description: "This node's Tailscale address, which jobs must NOT reach (e.g. 100.x.y.z)"
         required: true
-        default: "100.66.217.76"
       stress:
         description: "Also run the concurrency stress test (slow)"
         required: false

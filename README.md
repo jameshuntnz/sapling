@@ -1,82 +1,107 @@
 # Sapling
 
-Self-hosted GitHub Actions orchestration for Apple Silicon Macs, written entirely in Swift.
+**Run your GitHub Actions on a Mac you own.**
 
-Sapling runs ephemeral, isolated build environments — real macOS VMs via [Tart](https://github.com/cirruslabs/tart), Linux containers via Apple's `container` — for GitHub Actions jobs on a Mac you own. It ships a control-plane API, a CLI, and a native menu bar app you can point at the node from wherever you're working.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Swift 6](https://img.shields.io/badge/swift-6.0-orange.svg)](https://swift.org)
+[![Platform: macOS 15+](https://img.shields.io/badge/platform-macOS%2015%2B%20(Apple%20Silicon)-lightgrey.svg)](#requirements)
 
-Single-node today. The control plane, the `nodes` table, and the enrollment endpoint are already multi-node shaped, so adding a second Mac later is configuration, not a rewrite.
+Sapling turns an Apple Silicon Mac into a self-hosted GitHub Actions runner
+that gives every job a **fresh, isolated machine** and throws it away when the
+job finishes — a real macOS VM for macOS jobs, a Linux container for Linux
+ones. Nothing carries over between builds.
+
+It's written entirely in Swift and ships three pieces: a daemon, a CLI, and a
+native menu bar app you can point at the node from wherever you work.
 
 ---
+
+## Why you might want it
+
+- **macOS minutes are the expensive ones.** A Mac mini you already own runs
+  them for the price of electricity, and an M4 is not slow.
+- **Your builds stay off your laptop.** Every job gets its own VM or container,
+  built on demand and deleted afterwards. The isolation is the point.
+- **Jobs can't reach your network.** Egress is default-deny to private address
+  space — a job can talk to the internet and nothing else. Not your LAN, not
+  your router, not your tailnet, not the rest of what the Mac hosts.
+- **It's yours.** No third-party runner service, no agent phoning somewhere
+  else, no queue you don't control.
 
 ## What it does
 
-- **macOS jobs** run in a fresh Tart VM cloned from a base image, registered as an ephemeral runner, and deleted when the job ends. The VM *is* the isolation boundary.
-- **Linux jobs** run in an Apple `container` — VM-per-container, sub-second boot, near-zero idle memory. Chosen over Docker/Colima specifically to keep idle RAM low on a 16GB box.
-- **Slot accounting** respects Apple's hard limit of two concurrent macOS VMs. The config value is advisory; the scheduler always uses the clamped one.
-- **Egress is default-deny to private address space.** A job can reach the internet and nothing else — not your LAN, not your router, not your tailnet, not the rest of what this Mac hosts. Every environment then has to *prove* it can reach GitHub before a runner starts in it, because the job network is built on demand and can be broken in ways nothing else reports.
-- **Caching happens on the host**, through pull-through proxies, so nothing job-specific has to survive between runs for builds to stay fast.
-- **Monitoring** is a native menu bar app over Tailscale, plus a CLI. Both are thin clients against the same REST API; neither contains orchestration logic.
+- **macOS jobs** run in a fresh [Tart](https://github.com/cirruslabs/tart) VM
+  cloned from a base image, registered as an ephemeral runner, deleted when the
+  job ends. The VM *is* the isolation boundary.
+- **Linux jobs** run in an Apple `container` — VM-per-container, sub-second
+  boot, near-zero idle memory. Chosen over Docker and Colima specifically to
+  keep idle RAM low on a 16GB box.
+- **Slots are accounted for**, respecting Apple's hard limit of two concurrent
+  macOS VMs, and each job gets a memory budget sized from what it has actually
+  used before.
+- **Caching happens on the host**, through pull-through proxies, so nothing
+  job-specific has to survive between runs for builds to stay fast.
+- **Monitoring** is a native menu bar app plus a CLI, both thin clients over
+  the same REST API.
 
-## What it explicitly does not do
+## What it deliberately doesn't do
 
-- **Fork builds.** A workflow run is only ever run when its code came from the repository being watched. Fork pull requests are refused — on public and private repos alike, with no setting to turn it off, because nothing here sandboxes against adversarial job code. Public repos are supported on that basis; see [Public repositories](#public-repositories).
-- **Multi-tenancy.** Access control is "you're on my tailnet." There is no user model.
+- **Fork builds.** A run is only ever executed when its code came from the
+  repository being watched. Fork pull requests are refused — on public and
+  private repos alike, with no setting to turn it off, because nothing here
+  sandboxes against adversarial job code. See [SECURITY.md](SECURITY.md).
+- **Multi-tenancy.** Access control is "you're on my tailnet". There is no user
+  model.
 - **Windows.** Out of scope.
 
----
-
-## Layout
-
-```
-Sources/
-  SaplingCore/        Shared by every other module
-    Models/             Domain types and the API's wire DTOs
-    Configuration/      config.toml, one file per section
-    Networking/         REST client, endpoint resolution, client config
-    System/             Process interop, paths, logging
-  SaplingDB/          SQLite (GRDB)
-    Schema/             Migrations
-    Records/            Storage-layer row types
-    Store/              Query surface, split by table
-  SaplingAgent/       The only module that orchestrates anything
-    GitHub/             API client, App auth, response models
-    Providers/          Tart (macOS) and container (Linux) job execution
-    Networking/         pf egress filter
-    Node/               Poll loop, dispatch, execution, housekeeping
-  SaplingAPI/         Control plane
-    Server/             Vapor app, routes, bind resolution
-    Cache/              Pull-through package caches
-  SaplingInstall/     Bootstrap
-    Steps/              One file per §9.5 step
-  sapling/            CLI (Swift Argument Parser)
-    Commands/
-  SaplingMenuBar/     SwiftUI MenuBarExtra app
-    Model/ Views/ Design/
-
-Tests/SaplingTests/   Mirrors the module layout
-  Support/            Shared fixtures, including a fake GitHub API
-  Core/ DB/ Agent/ API/ Install/
-```
-
-Both clients talk to the same `/api/v1` surface. The agent is the only thing that orchestrates.
-
-Storage-layer records are kept separate from the wire DTOs on purpose: the database schema and the API contract should be free to drift apart, and a little conversion boilerplate is cheaper than coupling them.
+Single-node today, though the control plane and the enrollment endpoint are
+already multi-node shaped — adding a second Mac later is configuration rather
+than a rewrite.
 
 ---
 
-## Quick start
+## Requirements
 
-**On the node** (a Mac mini, headless, reachable over Tailscale):
+- An Apple Silicon Mac running **macOS 15 or newer**. A headless Mac mini is
+  the intended shape; a spare laptop works.
+- **Tailscale**, for reaching the node. The API binds to the tailnet and
+  nothing wider.
+- A **GitHub App** (recommended) or a personal access token.
+- Xcode Command Line Tools. Everything else — Tart, Apple's `container`, the
+  LaunchDaemon — is installed by `sapling install`.
+
+## Try it before you commit to anything
+
+```bash
+swift run sapling demo
+```
+
+That runs the control plane against a seeded in-memory database — no GitHub, no
+VMs, no containers — so you can click around the CLI and the menu bar app
+immediately.
+
+## Set up a node
+
+On the Mac that will run the builds:
 
 ```bash
 sudo sapling install
 ```
 
-It checks every dependency and fills in what's missing, then registers a LaunchDaemon so it comes back after a reboot. Re-running it is safe and only redoes what's absent — after a partial failure, a macOS update, or a wipe.
+It checks every dependency, fills in what's missing, and registers a
+LaunchDaemon so the node comes back after a reboot. Re-running it is safe and
+only redoes what's absent — after a partial failure, a macOS update, or a wipe.
 
-Two steps genuinely cannot be automated and are printed as instructions when reached: the one-time Tailscale login, and building the base macOS VM image (Apple's Setup Assistant has no scriptable path). See [docs/INSTALL.md](docs/INSTALL.md) for the full bring-up from a wiped machine.
+Two steps genuinely cannot be automated and are printed as instructions when
+reached: the one-time Tailscale login, and building the base macOS VM image
+(Apple's Setup Assistant has no scriptable path).
 
-**On the Mac you work from:**
+→ **[docs/INSTALL.md](docs/INSTALL.md)** is the full bring-up from a wiped
+machine. **[docs/BASE-IMAGE.md](docs/BASE-IMAGE.md)** covers the VM image.
+
+## Install the menu bar app
+
+On the Mac you actually work from:
 
 ```bash
 ./scripts/build-app.sh
@@ -84,26 +109,44 @@ cp -R dist/Sapling.app /Applications/
 open /Applications/Sapling.app
 ```
 
-Set the daemon address in the app's settings to your node's Tailscale name.
+Then set the daemon address in the app's settings to your node's Tailscale
+name.
 
-**Trying it out before a node exists:**
+## Point a workflow at it
 
-```bash
-sapling demo
+Ordinary self-hosted labels:
+
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted, macos, arm64]
+
+  test:
+    runs-on: [self-hosted, linux, arm64]
 ```
 
-Runs the control plane against a seeded in-memory database — no GitHub, no VMs, no containers — so you can exercise the CLI and the menu bar app immediately.
+Linux jobs get a bare runner image by default. If your job needs a real
+toolchain, commit a Dockerfile to the repository and ask for it by label:
+
+```yaml
+runs-on: [self-hosted, linux, arm64, image:android]
+```
+
+The node reads `.sapling/images/android/Dockerfile` at your job's own commit
+and builds it, keyed on the directory's git tree SHA — so it rebuilds when the
+definition changes and only then.
+
+→ **[docs/CONFIGURATION.md](docs/CONFIGURATION.md#repository-defined-images)**
+for how images work, including Rosetta for toolchains with no arm64 build.
 
 ---
 
-## CLI
+## The CLI
 
 ```
-sapling update             Install the newest release (no sudo — the daemon does it).
 sapling install            Bootstrap this Mac. Safe to re-run.
 sapling doctor             Read-only health check of every dependency.
 sapling upgrade            Replace the installed binary, restart the daemon.
-sapling restart            Restart the daemon (refuses while jobs are running).
 sapling uninstall          Remove the daemon (--purge also removes config and VMs).
 
 sapling serve              Run the control plane and node agent.
@@ -116,21 +159,22 @@ sapling nodes              List nodes.
 sapling nodes join-token   Generate an enrollment token.
 sapling drain              Stop accepting new jobs, wait for running ones.
 sapling cordon / uncordon  Pause / resume job acceptance.
+sapling restart            Restart the daemon (refuses while jobs are running).
 
 sapling config             Show the configuration the daemon is running with.
 sapling config reload      Re-read config.toml without restarting the daemon.
 sapling config validate    Parse and check a config file, warnings included.
 sapling config edit        Edit in $EDITOR, check it, save it, reload the daemon.
 
-sapling update             Install the newest release on the node's channel.
+sapling update             Install the newest release (no sudo — the daemon does it).
 sapling update --check     Report what's available without installing it.
 ```
 
-Every command that talks to the API accepts `--server`, and otherwise resolves in order: `$SAPLING_SERVER`, `~/.sapling/client.toml`, the local daemon's own config, loopback.
+Every command that talks to the API accepts `--server`, and otherwise resolves
+in order: `$SAPLING_SERVER`, `~/.sapling/client.toml`, the local daemon's own
+config, loopback.
 
----
-
-## REST API
+## The REST API
 
 ```
 GET  /api/v1/status               node health, slot usage
@@ -147,291 +191,72 @@ POST /api/v1/cordon               pause acceptance
 POST /api/v1/uncordon             resume acceptance
 ```
 
-Bound to the Tailscale interface only. There is no auth layer — tailnet membership is the access control, which is sound *because* of the binding, so `BindResolver` refuses to fall back to a wider interface if it can't find a Tailscale address.
-
-**A browser dashboard was deferred, not rejected.** It needs no daemon changes — same API, add a static frontend. Nothing about the API design needs revisiting to enable it.
-
----
+There is no auth layer. The API binds to the Tailscale interface only, and
+`BindResolver` refuses to fall back to a wider interface if it can't find a
+Tailscale address — so tailnet membership is the access control, and it's sound
+*because* of the binding.
 
 ## Configuration
 
-`~/.sapling/config.toml`, written by `sapling install`, mode 0600.
+`~/.sapling/config.toml`, written by `sapling install`, mode 0600. It's
+hand-written TOML — there is no `config set`, because the comments explaining
+why a node is tuned the way it is are worth more than the convenience.
 
-```toml
-[node]
-name = "mac-mini-01"
-
-[server]
-bind = "tailscale"   # or "loopback", or an explicit address
-port = 8734
-
-[github]
-auth = "app"         # "app" (recommended) or "pat"
-app_id = "123456"
-installation_id = "7654321"
-private_key_path = "~/.sapling/github-app.pem"
-repos = []           # empty: every private repo the App installation grants
-poll_interval_seconds = 30
-# After 3 failed attempts the node gives up on a job. GitHub has no per-job
-# cancel, so telling it means cancelling the whole run — siblings included.
-cancel_run_when_exhausted = false
-# Let discovery watch public repos too. Fork PRs are refused either way.
-allow_public_repos = false
-
-[macos]
-enabled = true
-base_image = "sapling-macos-base"
-max_concurrent = 2   # clamped to 2 — Apple's limit
-ssh_username = "admin"
-
-[linux]
-enabled = true
-default_image = "ghcr.io/actions/actions-runner:latest"  # used when a job names none
-max_concurrent = 2
-rosetta = false                   # translate x86-64 binaries — Android's aapt2 needs it
-                                  # requires Rosetta on the host: see below
-build_images = true               # build images the repos define (see below)
-images_path = ".sapling/images"   # where in each repo those definitions live
-# arch = "arm64"                  # only to run a foreign-architecture image outright
-
-[network]
-block_private_ranges = true    # §8 — leave this on
-allowed_cidrs = []             # escape hatch for a specific host
-
-[cache]
-enabled = true
-port = 8735
-proxies = ["go", "cargo"]
-
-[update]
-repository = "jameshuntnz/sapling"
-channel = "stable"       # stable | rc | dev
-check_interval_hours = 6
-auto_apply = false       # even when true, only applies while idle
-```
-
-### Changing it without stopping the node
-
-`sapling config reload` re-reads the file into the running daemon; `SIGHUP`
-does the same from the node itself. Neither restarts anything, which matters
-because a restart fails whatever job is mid-build — up to two hours of it.
-
-Only the fields the daemon reads at the point of use change live: the poll
-list and interval, the concurrency and memory ceilings, the labels, the Linux
-default image, and the whole `[update]` section. Everything else was consumed
-once — the listener is bound, the providers hold their platform settings, the
-pf anchor is written — so a reload **reports** those and leaves them alone
-rather than letting the file describe something the machine isn't doing.
-
-```
-$ sapling config reload
-applied 2 fields; 1 field needs a daemon restart
-
-Applied
-  github.poll_interval_seconds  30 → 60
-  github.repos                  [acme/widgets] → [acme/widgets, acme/gizmos]
-
-Needs a daemon restart
-  server.port                   8734 → 9001
-```
-
-`sapling restart` applies the rest, and `--wait` lets the running jobs finish
-first rather than failing them. No sudo: the daemon is already root, so it
-restarts itself.
-
-The file is parsed and validated in full before any of it is applied, so a
-typo leaves the node exactly as it was. `sapling config show` says the same
-thing ahead of time — what is running, and what is waiting in the file for a
-reload or a restart — and `sapling config edit` does the whole loop through a
-copy, so an edit that fails to parse is never written back.
-
-There is no `config set`. The file is hand-written TOML whose comments explain
-why a node is tuned the way it is, and writing it back from a decoded struct
-would throw all of that away.
-
----
-
-## Which repositories a node watches
-
-Leave `github.repos` empty and the node watches **every private repository its
-GitHub App installation can reach**, so granting access is done once on GitHub
-rather than twice. List repositories explicitly to narrow it.
-
-The list is re-checked every 15 minutes, so granting or revoking a repository
-takes effect without a restart. If GitHub is unreachable the last known list is
-kept — a node that quietly stopped watching everything is indistinguishable
-from one with no queued work.
-
-**Public repositories are not discovered this way unless you ask.** They are
-logged and skipped until `allow_public_repos = true`; naming one in
-`github.repos` takes just that one. Inheriting a repository through an
-installation nobody re-read is not a decision, and this keeps it from being
-treated as one. It is not the safety boundary, though — see below.
-
-Empty is only meaningful under App auth. A PAT has no installation to
-enumerate — it reaches every repository its owner can see — so `repos` must be
-spelled out, and the daemon refuses to start otherwise.
-
-`sapling status` reports the resolved list, not the configured one.
-
-## Repository-defined images
-
-`ubuntu-latest` is not Ubuntu — it is a GitHub-maintained image preloaded with
-five JDKs, the Android SDK, `yq` and much else, and workflows depend on all of
-it without ever saying so. Sapling's Linux default is the bare runner agent, so
-each repository declares the images its own jobs need:
-
-```
-.sapling/images/
-  android/Dockerfile
-  release-tools/Dockerfile
-```
-
-A job asks for one by label. GitHub's REST API does not expose a job's
-`container:` key, so labels are the only channel available:
-
-```yaml
-runs-on: [self-hosted, linux, arm64, image:android]
-```
-
-The node strips `image:*` before deciding eligibility, reads that directory at
-the job's own commit, and builds it. **The cache key is the directory's git
-tree SHA**, which is what makes this work without a registry: git already
-hashes the directory's exact contents, so an image rebuilds when — and only
-when — its definition changes, and an ordinary commit to application code is a
-cache hit. A job naming no image gets `default_image`.
-
-Images are per-purpose, not per-repo. A repository with a Node client and an
-Android app should define two small images rather than one carrying both
-toolchains. Images sharing a `FROM` share those layers on disk, so the base is
-paid for once.
-
-### Rosetta, for toolchains with no arm64 build
-
-Some build tools have no arm64 Linux binary at all. Android's `aapt2` is the
-one that bites: Google publishes it for `linux-x86_64` only, and the Gradle
-plugin downloads its own copy from Maven regardless of what the SDK holds, so
-on an arm64 node it fails with `Exec format error`. A container does not
-emulate a CPU, so no image fixes this.
-
-Setting `rosetta = true` exposes Rosetta inside the container, and that one
-binary is translated while the JVM, compilers and everything else keep running
-natively. The image also has to carry the x86-64 loader and libc
-(`libc6:amd64`, `libgcc-s1:amd64` on Debian/Ubuntu).
-
-**Rosetta must be installed on the host**, which a headless Mac that has never
-run an Intel binary will not have:
+You can change most of it without stopping the node:
 
 ```bash
-sudo softwareupdate --install-rosetta --agree-to-license
+sapling config reload
 ```
 
-The daemon refuses to start when `rosetta = true` and it is missing, rather
-than letting the job fail with an elf loader error that mentions neither.
+Fields the daemon reads at the point of use — the repo list, poll interval,
+concurrency and memory ceilings, labels, the update channel — apply live.
+Anything consumed once at startup is *reported* rather than silently ignored,
+and `sapling restart --wait` applies those after the running jobs finish.
 
-Two things worth knowing before enabling this:
+→ **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** is the full reference.
 
-- **A repository's Dockerfile executes on the node**, at build time, outside
-  the job container. The definition is read at the job's own commit, and only
-  commits from the watched repository are ever run, so the trust is the same as
-  running a job — granted more widely. `build_images = false` declines it, and
-  on a public repository that is worth a second thought: whoever can push can
-  run a build step as the daemon.
-- **A changed Dockerfile blocks the next job** that asks for it, for as long as
-  the build takes. Subsequent jobs hit the cache.
+## Running public repositories
 
-Unused built images are pruned after 30 days, by reference rather than age — an
-image a job still points at is kept however old it is.
+Supported, on one condition that cannot be configured away: **a run is only
+executed when its code came from the repository being watched.** Fork pull
+requests are refused, on every repository, public or private, because Sapling
+does not sandbox against adversarial job code.
 
-## Public repositories
+Two things to know before pointing a node at a public repo:
 
-Supported, on one condition that cannot be configured away: **a workflow run is
-only run when its code came from the repository being watched.** Fork pull
-requests are refused, on every repository, public or private.
+1. **Turn on "Require approval for all outside collaborators"** in the
+   repository's Actions settings. That's the control that matters. Sapling can
+   decline a fork's job but can't withdraw it, so without approval required it
+   sits queued until GitHub times it out.
+2. **The repo's own commits still run unsandboxed.** Push access to a watched
+   repository is push access to that Mac. The daemon says so at startup.
 
-The test is the run's `head_repository.full_name` against the watched repo —
-deliberately not GitHub's `head_repository.fork` flag, which says the head repo
-is *itself* a fork of something and is therefore true of every branch push in a
-repository you maintain as a fork of an upstream project. Identity is the
-question; ancestry is not. A run whose provenance GitHub does not report — it
-returns a null head repository once the fork behind a PR is deleted — is
-refused too. Only a positive match admits.
+→ **[SECURITY.md](SECURITY.md)** has the full threat model, including what is
+and isn't worth reporting as a vulnerability.
 
-That one rule covers `pull_request_target`, `workflow_run` and `issue_comment`
-without naming any of them: a run originating in a fork reports the fork as its
-head repository under all of them.
+## Networking
 
-It is applied to the **run**, before its jobs are ever fetched. That is not an
-optimisation, though it does save a request per fork PR: the pipeline
-downstream reads a repository's image definitions at the job's commit and
-builds them on the node, outside any container, so refusing any later would be
-refusing after a fork's Dockerfile had already run.
+A job may reach the internet and nothing else. The egress filter is a pf anchor
+written per job, and a watchdog re-checks it for the whole life of the job
+rather than once at the start — Apple's `container` network can die with
+containers still attached, and nothing in `container list` or `tart ip` reports
+it.
 
-Two things follow that are worth knowing before you point a node at a public
-repo:
-
-- **Set "Require approval for all outside collaborators"** on the repository's
-  Actions settings. That is the control that matters. Sapling can only decline
-  a fork's job, not withdraw it — GitHub has no per-job cancel, and cancelling
-  the run would take down the GitHub-hosted jobs sitting beside ours in a
-  contributor's PR — so a refused job waits out GitHub's own timeout. With
-  approval required, it never reaches the queue. Refusals are counted in
-  `sapling status` and logged once per run, never filed as failed jobs.
-- **The repo's own commits still run unsandboxed.** Refusing forks closes the
-  path that made public repos dangerous and closes nothing else. Push access to
-  a watched repository is push access to this Mac; the daemon says so at
-  startup for any public repo it watches.
-
-## Open decisions
-
-Flagged rather than silently resolved, per the design doc's §12.
-
-| Decision | Taken | Why |
-|---|---|---|
-| PAT vs GitHub App default | **Both implemented; App is the documented default**, PAT is the quick start | 15k req/hr vs 5k, and finer-grained permissions. `sapling install` offers App first. |
-| Cache proxy scope | **Go and Cargo on by default**; npm wired but off | Follows ephemerd's precedent. npm/pip URL rewriting is fiddlier and nothing needs it yet. |
-| Polling vs webhooks | **Polling**, 30s default | Zero infrastructure, works behind NAT with no public endpoint, matches a Tailscale-only node. |
-
-Three more decisions came up during implementation and are documented where they bite:
-
-- **JIT runner config over registration tokens.** The runner arrives already configured, runs one job, removes itself. One consequence: a JIT runner picks up *whichever* queued job matches its labels, not necessarily the one that prompted the launch — so job outcomes are reconciled against the GitHub API rather than inferred from the runner's exit code.
-- **Key-based SSH into macOS VMs**, not the base image's password. Adds one line to base-image prep; means a leaked image password isn't enough to reach a running build.
-- **The daemon runs as root** so it can manage the pf anchor, with `TART_HOME` pointed at your user's image library. `sapling install --run-as <user>` exists if Virtualization.framework turns out to be unhappy in the system launchd domain — see [docs/INSTALL.md](docs/INSTALL.md#if-vms-fail-to-start-under-the-launchdaemon).
-- **Linux jobs need a login session on the node.** Apple's `container` stores state under the user's home and runs its apiserver in that user's GUI launchd domain, so root cannot talk to it directly — it returns `XPC connection error: Connection invalid`. Sapling reaches it with `launchctl asuser`, which requires a console user to be logged in. This is why the node is set up with automatic login, and it is a property of Apple's tool rather than a choice Sapling makes. §10 of the design doc assumed the daemon could be wholly independent of a GUI session; with `container` in the stack, it cannot be.
-
----
-
-## Releasing
-
-Commit messages drive versions. `feat:` bumps the minor, `fix:`/`perf:` the
-patch, `!` or `BREAKING CHANGE:` the major.
-
-A dev build publishes whenever CI goes green on `main` — triggered by CI's
-success rather than by the push, so the release can skip re-running the checks
-CI just did. Promotion is deliberate:
-
-```bash
-gh workflow run release.yml -f channel=dev      # what a node's `sapling update` picks up
-gh workflow run release.yml -f channel=stable
-```
-
-Nodes update themselves, without `sudo`, because the daemon is already root:
-
-```bash
-sapling update --check
-sapling update
-```
-
-See [docs/RELEASING.md](docs/RELEASING.md) for channels, hotfixes, and what the
-update mechanism does and doesn't verify.
+→ **[docs/NETWORKING.md](docs/NETWORKING.md)** for how it's built and what
+reproduction ruled out.
 
 ## Releasing and updating
 
-Push to `main` and CI verifies it; nothing is published. Releases are
-dispatched deliberately from **Actions → Release**, where you pick a channel —
-`dev`, `rc`, `stable` or `hotfix`. Commit messages decide the version:
-`feat:` bumps the minor, `fix:` and `perf:` the patch, and everything else
-publishes nothing.
+Commit messages drive versions: `feat:` bumps the minor, `fix:` and `perf:` the
+patch, `!` or `BREAKING CHANGE:` the major, and everything else publishes
+nothing.
+
+A **dev** build publishes whenever CI goes green on `main`. Promotion is
+deliberate, from **Actions → Release** or by dispatch:
+
+```bash
+gh workflow run release.yml -f channel=stable
+```
 
 Nodes update themselves:
 
@@ -443,33 +268,43 @@ No `sudo` — the daemon already runs as root, so it downloads, verifies against
 the published checksum, swaps its own binary and restarts. It refuses while
 jobs are running, and keeps the previous binary so a bad update can be undone.
 
-[docs/RELEASING.md](docs/RELEASING.md) covers the version rules, the channel
-ordering that decides what a node will accept, and how to recover a bad update.
+→ **[docs/RELEASING.md](docs/RELEASING.md)** for channels, hotfixes, and
+recovery.
 
-## Picking up the work
+---
 
-[docs/AUTOMATION-GAPS.md](docs/AUTOMATION-GAPS.md) lists everything a human had
-to do by hand to bring up the first node, why `sapling install` didn't do it,
-and what closing each gap would take. It's written for whoever works on this
-next — start there rather than here.
+## Documentation
 
-## Development
+| | |
+|---|---|
+| [INSTALL.md](docs/INSTALL.md) | Bringing up a node from a wiped machine |
+| [BASE-IMAGE.md](docs/BASE-IMAGE.md) | Building the base macOS VM image |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | Every config field, live reload, repository-defined images |
+| [NETWORKING.md](docs/NETWORKING.md) | The egress filter, in detail |
+| [TESTING.md](docs/TESTING.md) | Verifying a node behaves, phase by phase |
+| [RELEASING.md](docs/RELEASING.md) | Versions, channels, and how a node updates |
+| [DESIGN.md](docs/DESIGN.md) | Module layout and why things are shaped this way |
+| [AUTOMATION-GAPS.md](docs/AUTOMATION-GAPS.md) | What's still manual, and what closing each gap would take |
+
+## Contributing
 
 ```bash
 make check     # lint, file sizes, build, test — what CI runs
-make test      # 141 tests
 make format    # reformat in place
 make app       # assemble dist/Sapling.app
+make help      # everything else
 ```
 
-`make help` lists everything.
+The test suite needs no network, no GitHub token, and no VMs — the real client
+and poll loop are driven against a fake GitHub API over the same HTTP stack.
 
-### Code hygiene
+One thing to know before opening a pull request: **CI runs on a self-hosted Mac
+and will not run a fork's code**, by the same rule described above. Run
+`make check` locally and say so.
 
-Formatting and linting use `swift format` from the toolchain, so there is nothing to install.
+→ **[CONTRIBUTING.md](CONTRIBUTING.md)** for the conventions and what needs
+verifying on real hardware.
 
-- **`.swift-format`** is the baseline. `Sources/.swift-format` adds the stricter rules production code is held to — no force-unwrapping, no force-`try`. Test code may reasonably force-unwrap a literal it just built.
-- **Every public declaration carries documentation**, enforced by `AllPublicDeclarationsHaveDocumentation`. If that feels heavy for a given type, the question to ask is whether it needs to be `public` at all — most types don't cross a module boundary, and `@testable import` means tests can still reach them.
-- **Files are capped at 300 lines** (`scripts/check-file-sizes.sh`, warning from 250). The cap is a prompt to split along a seam that already exists — an extension, a nested type, a separate responsibility.
+## License
 
-Tests mirror the module layout and share fixtures from `Tests/SaplingTests/Support/`, including a fake GitHub API that the real `GitHubClient` and the real poll loop are driven against — same HTTP stack, same JSON shapes, no network and no token.
+MIT — see [LICENSE](LICENSE).

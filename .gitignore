@@ -6,6 +6,8 @@ dist/
 *.app
 .DS_Store
 
-# Agent worktrees. Kept inside the repo so they're easy to find, ignored so
-# they never show up as untracked noise in the main checkout.
+# Agent worktrees and local agent settings. Kept inside the repo so they're
+# easy to find, ignored so they never show up as untracked noise in the main
+# checkout — or get committed to a public repository by accident.
 .worktrees/
+.claude/
