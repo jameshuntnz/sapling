@@ -27,6 +27,7 @@ coverage: ## Report test coverage per file
 lint: ## Fail on style or documentation violations
 	@./scripts/lint.sh
 	@./scripts/check-workflows.sh
+	@./scripts/test-next-version.sh >/dev/null && echo "version derivation ok"
 
 format: ## Reformat sources in place
 	@./scripts/format.sh
