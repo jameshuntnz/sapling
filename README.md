@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Swift 6](https://img.shields.io/badge/swift-6.0-orange.svg)](https://swift.org)
-[![Platform: macOS 15+](https://img.shields.io/badge/platform-macOS%2015%2B%20(Apple%20Silicon)-lightgrey.svg)](#requirements)
+[![Platform: macOS 15+ Apple Silicon](https://img.shields.io/badge/platform-macOS%2015%2B%20Apple%20Silicon-lightgrey.svg)](#requirements)
 
 Sapling turns an Apple Silicon Mac into a self-hosted GitHub Actions runner
 that gives every job a **fresh, isolated machine** and throws it away when the
@@ -64,11 +64,14 @@ than a rewrite.
 
 - An Apple Silicon Mac running **macOS 15 or newer**. A headless Mac mini is
   the intended shape; a spare laptop works.
-- **Tailscale**, for reaching the node. The API binds to the tailnet and
-  nothing wider.
+- **Xcode Command Line Tools** (`xcode-select --install`) — the one dependency
+  Sapling can report but not install for you.
+- A **Tailscale** account. The API binds to the tailnet and nothing wider, so
+  this is how you reach the node at all.
 - A **GitHub App** (recommended) or a personal access token.
-- Xcode Command Line Tools. Everything else — Tart, Apple's `container`, the
-  LaunchDaemon — is installed by `sapling install`.
+
+`sapling install` takes care of the rest: Homebrew, Tailscale, Tart, Apple's
+`container`, and the LaunchDaemon.
 
 ## Try it before you commit to anything
 

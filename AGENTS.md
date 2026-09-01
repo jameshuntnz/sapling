@@ -33,6 +33,8 @@ Each of these cost a debugging cycle on real hardware. The unit suite was green 
 
 ## Docs
 
-[NETWORKING.md](docs/NETWORKING.md) · [RELEASING.md](docs/RELEASING.md) · [INSTALL.md](docs/INSTALL.md) · [BASE-IMAGE.md](docs/BASE-IMAGE.md) · [TESTING.md](docs/TESTING.md) · [AUTOMATION-GAPS.md](docs/AUTOMATION-GAPS.md) — what's still manual, for whoever picks this up.
+[DESIGN.md](docs/DESIGN.md) · [CONFIGURATION.md](docs/CONFIGURATION.md) · [NETWORKING.md](docs/NETWORKING.md) · [RELEASING.md](docs/RELEASING.md) · [INSTALL.md](docs/INSTALL.md) · [BASE-IMAGE.md](docs/BASE-IMAGE.md) · [TESTING.md](docs/TESTING.md) · [AUTOMATION-GAPS.md](docs/AUTOMATION-GAPS.md) — what's still manual, for whoever picks this up.
+
+Public-facing: [README.md](README.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md). The threat model lives in SECURITY.md; keep it true when the fork policy or the egress filter changes.
 
 Verify against hardware before believing it works. Everything above came from something that passed tests and failed on the machine.
