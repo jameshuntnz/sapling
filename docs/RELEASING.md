@@ -138,6 +138,19 @@ sapling update             # install it
 the CLI is only asking. That is the whole reason updating stopped being a
 chore.
 
+**You do not have to be on the node.** The CLI is only an API client here, so
+this works from whatever Mac you watch from, against a headless node you never
+log into:
+
+```bash
+sapling update --server mac-mini-01
+```
+
+Without `--server` it resolves the usual way — `$SAPLING_SERVER`,
+`~/.sapling/client.toml`, the local daemon's config, then loopback — so on a
+machine already set up to watch the node, plain `sapling update` updates *that
+node*, not the Mac you typed it on.
+
 What the daemon does, in order:
 
 1. **Refuses if jobs are running** — a restart marks every in-flight job failed

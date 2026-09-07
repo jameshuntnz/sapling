@@ -19,6 +19,10 @@ struct Update: AsyncParsableCommand {
             Which releases a node will take is set by `update.channel` in its \
             config: `stable` ignores rc and dev builds, `rc` takes candidates \
             and releases, `dev` takes whatever is newest.
+
+            Runs against whichever node `--server` resolves to, so it updates a \
+            headless node from the Mac you watch from — you do not have to log \
+            into the node to update it.
             """
     )
 
