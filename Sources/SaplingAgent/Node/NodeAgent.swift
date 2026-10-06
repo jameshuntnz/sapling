@@ -99,7 +99,12 @@ public actor NodeAgent {
     /// behind, and a JIT runner that has been created but has not connected
     /// yet looks exactly like one of those. Without this it deleted runners it
     /// had minted seconds earlier.
-    var inFlightRunners: Set<String> = []
+    var inFlightRunners: Set<String> { Set(runnerNames.values) }
+    /// The runner minted for each job this node is starting or running, by job id.
+    ///
+    /// Also what tells a job GitHub finished on *another* runner apart from
+    /// one ours is finishing: GitHub names the runner that ran it.
+    var runnerNames: [String: String] = [:]
     /// Runs already refused on provenance and already logged.
     ///
     /// Keyed `repo#runID`, and rebuilt each poll from what GitHub still has

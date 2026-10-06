@@ -53,4 +53,23 @@ struct EventSinkTests {
         let sink = StoreEventSink(store: store, jobID: "no-such-job")
         await sink.record("something", detail: nil)
     }
+
+    /// Both the console line and the runner's diagnostic copy of it name the
+    /// job; anything else leaves the last announcement alone.
+    @Test("remembers the job the runner announced")
+    func capturesAnnouncedJob() async throws {
+        let store = try SaplingStore(inMemoryNamed: UUID().uuidString)
+        let announcements = RunnerAnnouncements()
+        let sink = StoreEventSink(store: store, jobID: "1", announcements: announcements)
+
+        await sink.record(RunEventName.log, detail: "2026-10-06 19:34:28Z: Listening for Jobs")
+        #expect(await announcements.jobName == nil)
+
+        await sink.record(
+            RunEventName.log,
+            detail: "[RUNNER 2026-10-06 19:34:30Z INFO Terminal] WRITE LINE: 2026-10-06 19:34:30Z: "
+                + "Running job: Sweep builds whose branch is gone")
+        await sink.record(RunEventName.log, detail: "Job completed with result: Succeeded")
+        #expect(await announcements.jobName == "Sweep builds whose branch is gone")
+    }
 }
