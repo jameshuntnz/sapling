@@ -189,10 +189,15 @@ GET  /api/v1/jobs/:id/logs?after= event log, tailable
 GET  /api/v1/jobs/:id/resources   that job's VM or container, against its limits
 GET  /api/v1/config               effective config, credentials redacted
 POST /api/v1/config/reload        re-read config.toml without a restart
+POST /api/v1/jobs/:id/cancel      stop a job and free its slot
+POST /api/v1/jobs/:id/retry       queue a finished job to run again
 POST /api/v1/drain                stop accepting new jobs
 POST /api/v1/cordon               pause acceptance
 POST /api/v1/uncordon             resume acceptance
 ```
+
+`cancel` frees the node's slot; it does not cancel the job on GitHub, which
+has no per-job cancel.
 
 There is no auth layer. The API binds to the Tailscale interface only, and
 `BindResolver` refuses to fall back to a wider interface if it can't find a

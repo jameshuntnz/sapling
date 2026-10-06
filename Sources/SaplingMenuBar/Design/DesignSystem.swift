@@ -40,7 +40,19 @@ enum Palette {
 }
 
 /// Value formatting shared across the panel.
-enum Format {}
+enum Format {
+    /// One-line form of a message that may arrive as a multi-line blob.
+    ///
+    /// The daemon quotes upstream errors verbatim, and GitHub answers with
+    /// pretty-printed JSON — so "could not check for updates" arrives as five
+    /// lines of braces. Rendered as-is that blows out a banner sized for a
+    /// sentence. The full text goes in the tooltip; this is what gets drawn.
+    static func oneLine(_ text: String, limit: Int = 160) -> String {
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard collapsed.count > limit else { return collapsed }
+        return collapsed.prefix(limit).trimmingCharacters(in: .whitespaces) + "…"
+    }
+}
 
 enum Metrics {
     static let panelWidth: CGFloat = 380

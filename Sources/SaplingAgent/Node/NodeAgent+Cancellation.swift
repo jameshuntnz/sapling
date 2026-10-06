@@ -219,3 +219,66 @@ extension NodeAgent {
         }
     }
 }
+
+/// Letting go of work a person has withdrawn.
+///
+/// Separate from the GitHub-driven path above because the judgement is
+/// different, not just the trigger. That path only ever releases jobs GitHub
+/// has already finished with, so it can be sure nothing is lost. This one is
+/// asked to stop work GitHub still wants, and the honest consequence — the job
+/// is not cancelled on GitHub, only here — has to be reported rather than
+/// hidden.
+extension NodeAgent {
+    /// What happened when someone asked for a job to be stopped.
+    public enum CancelOutcome: Sendable, Equatable {
+        /// It was running here; its environment is being torn down.
+        case stopped
+        /// It was not running here, so it was recorded as cancelled outright.
+        ///
+        /// Either it was still queued, or it is a job left `running` by a
+        /// daemon that died — there is no task to cancel in either case.
+        case dropped
+        /// No job with that id.
+        case notFound
+        /// Already over, so there is nothing to stop.
+        case alreadyFinished(JobStatus)
+    }
+
+    /// Stop running a job because a person asked.
+    ///
+    /// This releases the node's slot; it does not cancel the job on GitHub.
+    /// GitHub has no per-job cancel — the only endpoint cancels the whole
+    /// workflow run, taking the job's siblings with it, including ones running
+    /// happily on the other platform. Doing that on a single job's behalf is
+    /// too destructive to infer from "stop this one", so the job is simply
+    /// abandoned here and left to GitHub's own timeout.
+    ///
+    /// The cancellation sticks. Discovery skips ids it has already recorded,
+    /// and `requeueJob` refuses a cancelled job, so the poll loop will not pick
+    /// this up again however long GitHub goes on offering it. Running it after
+    /// all is an explicit retry.
+    ///
+    /// - Parameters:
+    ///   - jobID: The job to stop.
+    ///   - reason: Why, recorded in the event log and on the job itself.
+    /// - Returns: What was actually done.
+    public func cancel(jobID: String, reason: String) async -> CancelOutcome {
+        guard let job = try? await store.job(id: jobID) else { return .notFound }
+        guard !job.status.isTerminal else { return .alreadyFinished(job.status) }
+
+        if runningJobs[jobID] != nil {
+            // Teardown, slot accounting and the terminal write all happen in
+            // `abandon` — the same path GitHub-driven cancellation takes, for
+            // the same reason: a cancelled task cannot write to the store, so
+            // the bookkeeping has to live outside it.
+            await abandon(job, reason: reason)
+            return .stopped
+        }
+
+        await recordEvent(jobID, RunEventName.jobCancelled, reason)
+        try? await store.updateJobStatus(
+            id: jobID, status: .cancelled, exitReason: reason, completedAt: Date())
+        Log.info("job \(jobID) cancelled: \(reason)")
+        return .dropped
+    }
+}

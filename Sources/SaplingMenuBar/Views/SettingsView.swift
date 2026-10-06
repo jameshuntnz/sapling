@@ -47,7 +47,7 @@ struct SettingsView: View {
                 Text("Sapling \(SaplingVersion.current)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Monitoring only — this app never orchestrates jobs itself.")
+                Text("This app never orchestrates jobs itself — every action asks the daemon.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

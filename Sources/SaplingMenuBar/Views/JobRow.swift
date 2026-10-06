@@ -24,7 +24,7 @@ struct JobRow: View {
                         .truncationMode(.head)
                     Text("·")
                     Text(job.platform.rawValue)
-                    if let duration = job.duration {
+                    if let duration = job.duration, job.status != .running {
                         Text("·")
                         Text(duration.durationDescription)
                             .monospacedDigit()
@@ -36,8 +36,8 @@ struct JobRow: View {
 
             Spacer(minLength: 4)
 
-            Text((job.completedAt ?? job.startedAt ?? job.queuedAt)?.relativeDescription ?? "")
-                .font(.caption2)
+            trailing
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
                 .fixedSize()
         }
@@ -48,5 +48,15 @@ struct JobRow: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
         )
         .contentShape(Rectangle())
+    }
+
+    /// How long a running job has been going; when anything else happened.
+    @ViewBuilder
+    private var trailing: some View {
+        if job.status == .running, let duration = job.duration {
+            Text(duration.durationDescription)
+        } else {
+            Text((job.completedAt ?? job.startedAt ?? job.queuedAt)?.relativeDescription ?? "")
+        }
     }
 }
