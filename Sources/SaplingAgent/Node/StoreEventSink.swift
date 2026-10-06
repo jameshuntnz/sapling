@@ -48,17 +48,30 @@ struct StoreEventSink: EventSink {
 /// own "Running job:" line is what says that answer is stale.
 actor RunnerAnnouncements {
     private static let marker = "Running job: "
+    private static let listening = "Listening for Jobs"
 
     /// The name of the last job the runner said it was running, if any.
     private(set) var jobName: String?
+    /// When the runner said it was listening, while it has not been given a job.
+    private(set) var listeningSince: Date?
 
     /// Picks the job name out of a runner line, if it carries one.
     ///
     /// Matches both the console line and the diagnostic copy the runner logs
     /// of it; they name the same job.
-    func observe(_ line: String) {
+    ///
+    /// - Parameters:
+    ///   - line: One line of runner output.
+    ///   - now: When it arrived.
+    func observe(_ line: String, at now: Date = Date()) {
+        if jobName == nil, listeningSince == nil, line.contains(Self.listening) {
+            listeningSince = now
+        }
         guard let range = line.range(of: Self.marker, options: .backwards) else { return }
         let name = line[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty { jobName = name }
+        if !name.isEmpty {
+            jobName = name
+            listeningSince = nil
+        }
     }
 }

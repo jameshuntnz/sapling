@@ -105,6 +105,8 @@ public actor NodeAgent {
     /// Also what tells a job GitHub finished on *another* runner apart from
     /// one ours is finishing: GitHub names the runner that ran it.
     var runnerNames: [String: String] = [:]
+    /// What each running job's runner has said about itself, by job id.
+    var runnerAnnouncements: [String: RunnerAnnouncements] = [:]
     /// Runs already refused on provenance and already logged.
     ///
     /// Keyed `repo#runID`, and rebuilt each poll from what GitHub still has
@@ -242,5 +244,16 @@ public actor NodeAgent {
     /// How many jobs this agent is currently running.
     public func activeJobCount() -> Int {
         runningJobs.count
+    }
+
+    /// Running jobs whose runner is connected but has no job yet, and since when.
+    ///
+    /// - Returns: Waiting start times keyed by job id; empty when none are waiting.
+    public func awaitingAssignment() async -> [String: Date] {
+        var waiting: [String: Date] = [:]
+        for (jobID, announcements) in runnerAnnouncements {
+            if let since = await announcements.listeningSince { waiting[jobID] = since }
+        }
+        return waiting
     }
 }

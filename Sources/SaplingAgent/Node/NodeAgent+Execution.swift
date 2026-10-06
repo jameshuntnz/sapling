@@ -56,7 +56,11 @@ extension NodeAgent {
             // Recorded before the runner exists, so housekeeping can never
             // sweep it during the seconds between minting and connecting.
             runnerNames[job.id] = runnerName
-            defer { runnerNames[job.id] = nil }
+            runnerAnnouncements[job.id] = announcements
+            defer {
+                runnerNames[job.id] = nil
+                runnerAnnouncements[job.id] = nil
+            }
 
             let jitConfig = try await github.jitConfig(
                 repo: job.repo,

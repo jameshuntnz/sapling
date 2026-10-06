@@ -35,12 +35,18 @@ public struct SaplingClient: Sendable {
         self.session = URLSession(configuration: config)
     }
 
-    private func send<T: Decodable>(_ method: String, _ path: String, as type: T.Type) async throws -> T {
+    private func send<T: Decodable>(
+        _ method: String, _ path: String, body: (any Encodable)? = nil, as type: T.Type
+    ) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL) else {
             throw ClientError(statusCode: nil, message: "bad path \(path)")
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        if let body {
+            request.httpBody = try SaplingJSON.encoder.encode(body)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
 
         let data: Data
         let response: URLResponse
@@ -105,11 +111,17 @@ public struct SaplingClient: Sendable {
     ///   - jobID: The job whose log to read.
     ///   - after: Return only events newer than this event id, for tailing
     ///     without refetching.
+    ///   - before: Return the newest events older than this event id, for
+    ///     paging back through a long log. Ignored when `after` is given.
     /// - Returns: The job's events, oldest first.
     /// - Throws: `ClientError` if the daemon is unreachable or returns an error.
-    public func logs(jobID: String, after: Int64? = nil) async throws -> LogsResponse {
+    public func logs(jobID: String, after: Int64? = nil, before: Int64? = nil) async throws -> LogsResponse {
         var path = "api/v1/jobs/\(jobID)/logs"
-        if let after { path += "?after=\(after)" }
+        if let after {
+            path += "?after=\(after)"
+        } else if let before {
+            path += "?before=\(before)"
+        }
         return try await send("GET", path, as: LogsResponse.self)
     }
 
@@ -202,6 +214,38 @@ public struct SaplingClient: Sendable {
     /// - Throws: `ClientError` if the daemon is unreachable.
     public func reloadConfig() async throws -> ConfigReloadResponse {
         try await send("POST", "api/v1/config/reload", as: ConfigReloadResponse.self)
+    }
+
+    /// Fetches what is using the node's disk.
+    ///
+    /// - Returns: Volume size, free space, and the largest users of it.
+    /// - Throws: `ClientError` if the daemon is unreachable or cannot report.
+    public func disk() async throws -> DiskReport {
+        try await send("GET", "api/v1/disk", as: DiskReport.self)
+    }
+
+    /// Asks the node to free space.
+    ///
+    /// - Parameters:
+    ///   - action: What to clean up.
+    ///   - target: What to do it to, where the action needs one.
+    /// - Returns: What happened and how much space came back.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func cleanDisk(_ action: DiskAction, target: String? = nil) async throws -> DiskCleanupResponse {
+        try await send(
+            "POST", "api/v1/disk/cleanup", body: DiskCleanupRequest(action: action, target: target),
+            as: DiskCleanupResponse.self)
+    }
+
+    /// Changes values in the node's config file, then reloads it.
+    ///
+    /// - Parameter values: Dotted keys mapped to their new value, in the form
+    ///   the config listing displays them. An empty value removes the key.
+    /// - Returns: What was applied, or why nothing was written.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func updateConfig(_ values: [String: String]) async throws -> ConfigReloadResponse {
+        try await send(
+            "PUT", "api/v1/config", body: ConfigUpdateRequest(values: values), as: ConfigReloadResponse.self)
     }
 
     /// Asks the daemon to restart itself through launchd.

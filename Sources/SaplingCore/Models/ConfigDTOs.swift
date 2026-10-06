@@ -23,6 +23,10 @@ public struct ConfigResponse: Codable, Sendable {
     /// against a file someone has since broken is exactly the state worth
     /// being able to see.
     public var fileError: String?
+    /// Keys `PUT /api/v1/config` accepts.
+    ///
+    /// Optional so a client can still read a daemon that could not be edited.
+    public var editableKeys: [String]?
 
     /// Creates a configuration view.
     public init(
@@ -40,6 +44,19 @@ public struct ConfigResponse: Codable, Sendable {
         self.pendingRestart = pendingRestart
         self.fileError = fileError
     }
+}
+
+/// Request body for `PUT /api/v1/config`.
+///
+/// Values use the same form `ConfigEntry.value` displays — `6`, `true`,
+/// `[self-hosted, macos]`, `stable` — and an empty value removes the key so
+/// its default applies.
+public struct ConfigUpdateRequest: Codable, Sendable {
+    /// Dotted keys mapped to their new value.
+    public var values: [String: String]
+
+    /// Creates an update request.
+    public init(values: [String: String]) { self.values = values }
 }
 
 /// Response body for `POST /api/v1/config/reload`.

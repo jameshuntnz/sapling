@@ -72,4 +72,19 @@ struct EventSinkTests {
         await sink.record(RunEventName.log, detail: "Job completed with result: Succeeded")
         #expect(await announcements.jobName == "Sweep builds whose branch is gone")
     }
+
+    /// A runner listening without an assignment is what a stuck job looks
+    /// like; the moment it names a job, it is not waiting any more.
+    @Test("knows when a runner is waiting for an assignment, and when it stops")
+    func tracksListening() async {
+        let announcements = RunnerAnnouncements()
+        let start = Date(timeIntervalSince1970: 1_000)
+        await announcements.observe("2026-10-06 19:34:28Z: Listening for Jobs", at: start)
+        await announcements.observe(
+            "2026-10-06 19:44:28Z: Listening for Jobs", at: start.addingTimeInterval(600))
+        #expect(await announcements.listeningSince == start)
+
+        await announcements.observe("2026-10-06 19:45:00Z: Running job: build")
+        #expect(await announcements.listeningSince == nil)
+    }
 }

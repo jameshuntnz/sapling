@@ -55,6 +55,14 @@ consequences of the model, not defects in it:
   wider interface when it can't find a Tailscale address. Tailnet membership
   *is* the access control. Reachability of the API from inside your own tailnet
   is the design working, not a finding.
+- **The API can change some things on the node**: stop and retry jobs, edit
+  live-reloadable config keys (`PUT /api/v1/config`), and delete unused VMs,
+  images and old logs (`POST /api/v1/disk/cleanup`). Each is bounded so that
+  tailnet access does not become control of what the node trusts. Config
+  writes are limited to an allowlist that excludes `update.repository`,
+  `github.allow_public_repos`, every credential and every restart-only key.
+  Disk cleanup re-checks its target against a fresh listing and refuses the
+  base image, job clones and anything running.
 - **The daemon runs as root**, because managing the pf anchor requires it.
 - **A refused fork job stays queued on GitHub** until GitHub's own timeout.
   Sapling declines it; it cannot withdraw it, because GitHub has no per-job

@@ -4,11 +4,14 @@ import SwiftUI
 struct JobRow: View {
     let job: Job
     let isSelected: Bool
+    /// When its runner started waiting for an assignment, if it has waited
+    /// long enough to look stuck.
+    var stuckSince: Date?
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: Palette.symbol(for: job.status))
-                .foregroundStyle(Palette.color(for: job.status))
+            Image(systemName: stuckSince == nil ? Palette.symbol(for: job.status) : "hourglass.circle.fill")
+                .foregroundStyle(stuckSince == nil ? Palette.color(for: job.status) : .orange)
                 .font(.callout)
                 .frame(width: 16)
 
@@ -53,7 +56,10 @@ struct JobRow: View {
     /// How long a running job has been going; when anything else happened.
     @ViewBuilder
     private var trailing: some View {
-        if job.status == .running, let duration = job.duration {
+        if let stuckSince {
+            Text("waiting \(Date().timeIntervalSince(stuckSince).durationDescription)")
+                .foregroundStyle(.orange)
+        } else if job.status == .running, let duration = job.duration {
             Text(duration.durationDescription)
         } else {
             Text((job.completedAt ?? job.startedAt ?? job.queuedAt)?.relativeDescription ?? "")

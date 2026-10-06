@@ -4,13 +4,19 @@ import Foundation
 public struct JobDetailResponse: Codable, Sendable {
     /// The job itself.
     public var job: Job
-    /// Its full event log, oldest first.
+    /// The newest part of its event log, oldest first.
     public var events: [RunEvent]
+    /// Whether older events exist than the first one here.
+    ///
+    /// Optional so a client can still read a daemon from before the log was
+    /// served newest-first; `nil` there means the log started at the top.
+    public var hasEarlier: Bool?
 
     /// Creates a job detail response.
-    public init(job: Job, events: [RunEvent]) {
+    public init(job: Job, events: [RunEvent], hasEarlier: Bool? = nil) {
         self.job = job
         self.events = events
+        self.hasEarlier = hasEarlier
     }
 }
 
@@ -38,11 +44,17 @@ public struct LogsResponse: Codable, Sendable {
     public var jobID: String
     /// Events, oldest first, starting after any requested offset.
     public var events: [RunEvent]
+    /// Whether older events exist, when the page was read backwards.
+    public var hasEarlier: Bool?
+
+    /// Most events one page carries; a full page means there may be more.
+    public static let pageSize = 1000
 
     /// Creates a log response.
-    public init(jobID: String, events: [RunEvent]) {
+    public init(jobID: String, events: [RunEvent], hasEarlier: Bool? = nil) {
         self.jobID = jobID
         self.events = events
+        self.hasEarlier = hasEarlier
     }
 }
 

@@ -4,6 +4,7 @@ import SwiftUI
 struct PanelView: View {
     @Environment(AppModel.self) private var model
     @State private var showingSettings = false
+    @State private var showingDisk = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,6 +14,8 @@ struct PanelView: View {
                 }
             } else if showingSettings {
                 SettingsView(isPresented: $showingSettings)
+            } else if showingDisk {
+                DiskView(isPresented: $showingDisk)
             } else {
                 overview
             }
@@ -59,6 +62,9 @@ struct PanelView: View {
                                 committedGB: status.committedMemoryGB,
                                 holdings: model.memoryHoldings)
                             SlotsView(slots: status.slots)
+                            if let total = status.diskTotalBytes, let free = status.diskFreeBytes {
+                                DiskSummaryRow(total: total, free: free) { showingDisk = true }
+                            }
                         }
 
                         if let metrics = status.metrics {
@@ -144,8 +150,11 @@ struct PanelView: View {
             SectionHeader(title: "Queued", trailing: "\(model.queuedJobs.count)")
             ForEach(model.queuedJobs) { job in
                 VStack(alignment: .leading, spacing: 1) {
-                    JobRow(job: job, isSelected: job.id == model.selectedJobID)
-                        .onTapGesture { model.select(jobID: job.id) }
+                    JobRow(
+                        job: job, isSelected: job.id == model.selectedJobID,
+                        stuckSince: model.stuckSince(jobID: job.id)
+                    )
+                    .onTapGesture { model.select(jobID: job.id) }
                     if let reason = reasons[job.id] {
                         Text(reason.summary)
                             .font(.caption2)
@@ -169,8 +178,11 @@ struct PanelView: View {
                 }
             } else {
                 ForEach(jobs) { job in
-                    JobRow(job: job, isSelected: job.id == model.selectedJobID)
-                        .onTapGesture { model.select(jobID: job.id) }
+                    JobRow(
+                        job: job, isSelected: job.id == model.selectedJobID,
+                        stuckSince: model.stuckSince(jobID: job.id)
+                    )
+                    .onTapGesture { model.select(jobID: job.id) }
                 }
             }
         }

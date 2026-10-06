@@ -96,7 +96,19 @@ struct JobLogs: AsyncParsableCommand {
         if let reason = job.exitReason { print("  \(Style.red(reason))") }
         print("")
 
-        var lastID = printEvents(detail.events)
+        // Paged from the top rather than taken from the detail, which carries
+        // only the newest page: the whole log is what `logs` means.
+        var lastID: Int64?
+        while true {
+            let page: LogsResponse
+            do {
+                page = try await client.logs(jobID: id, after: lastID)
+            } catch {
+                fail(error.localizedDescription)
+            }
+            if let newest = printEvents(page.events) { lastID = newest }
+            if page.events.count < LogsResponse.pageSize { break }
+        }
 
         guard follow else { return }
         while true {

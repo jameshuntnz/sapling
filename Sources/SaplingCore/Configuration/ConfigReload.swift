@@ -84,6 +84,19 @@ public enum ConfigReload {
         "update.auto_apply",
     ]
 
+    /// Fields a client may change through `PUT /api/v1/config`.
+    ///
+    /// The reloadable set, less the two that decide what the node trusts. The
+    /// API has no auth — tailnet membership is the access control (§8) — so
+    /// anything on the tailnet could otherwise point `update.repository` at
+    /// releases of its choosing and then ask the node to install one, or open
+    /// the node to public repositories' forks. Those stay a file edit on the
+    /// node itself.
+    public static let apiEditableKeys: Set<String> = reloadableKeys.subtracting([
+        "update.repository",
+        "github.allow_public_repos",
+    ])
+
     /// Fields that are never rendered, whatever they contain.
     ///
     /// The API has no auth — §8 makes tailnet membership the access control —
