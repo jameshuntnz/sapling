@@ -16,7 +16,7 @@ import Testing
 @Suite("Conclusion window")
 struct ConclusionWindowTests {
     static func job(id: String) -> Job {
-        Job(id: id, repo: "acme/widgets", platform: .macos, labels: [], status: .running)
+        Job(id: id, repo: "acme/widgets", platform: .macos, labels: [], status: .running, name: "build")
     }
 
     static func remoteJob(id: Int64, status: String, conclusion: String? = nil) -> String {
@@ -97,6 +97,40 @@ struct ConclusionWindowTests {
             let started = ContinuousClock.now
             let result = await agent.remoteConclusion(
                 for: Self.job(id: "7003"),
+                attempts: 1, retryDelay: .milliseconds(10), grace: .milliseconds(200))
+            #expect(result == .stillQueued)
+            #expect(ContinuousClock.now - started < .milliseconds(150))
+        }
+    }
+
+    /// The bug that put a finished job back in the queue: GitHub still said
+    /// `queued` twelve seconds after a thirteen-second job's runner exited,
+    /// though that runner had announced it was running exactly this job.
+    @Test("a queued answer contradicting our runner is waited out, not believed")
+    func queuedAfterOurRunnerRanItIsGraced() async throws {
+        try await Self.withGitHub(jobs: [
+            7005: Self.remoteJob(id: 7005, status: "queued")
+        ]) { agent in
+            let started = ContinuousClock.now
+            let result = await agent.remoteConclusion(
+                for: Self.job(id: "7005"), runnerRan: "build",
+                attempts: 1, retryDelay: .milliseconds(10), grace: .milliseconds(200))
+            #expect(ContinuousClock.now - started >= .milliseconds(180))
+            // Still queued after the whole grace is a hand-off after all.
+            #expect(result == .stillQueued)
+        }
+    }
+
+    /// A runner that announced some *other* job is the genuine hand-off, and
+    /// is handed back as promptly as before.
+    @Test("a runner that ran a different job hands this one back promptly")
+    func queuedAfterOurRunnerRanSomethingElse() async throws {
+        try await Self.withGitHub(jobs: [
+            7006: Self.remoteJob(id: 7006, status: "queued")
+        ]) { agent in
+            let started = ContinuousClock.now
+            let result = await agent.remoteConclusion(
+                for: Self.job(id: "7006"), runnerRan: "lint",
                 attempts: 1, retryDelay: .milliseconds(10), grace: .milliseconds(200))
             #expect(result == .stillQueued)
             #expect(ContinuousClock.now - started < .milliseconds(150))

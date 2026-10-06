@@ -38,22 +38,33 @@ extension NodeAgent {
             // an earlier pass through here, which is what stops this asking
             // GitHub about the same job on every cycle.
             guard job.status != .cleanup, runningJobs[job.id] != nil else { continue }
-            guard let reason = await abandonmentReason(for: job) else { continue }
-            await abandon(job, reason: reason)
+            guard let release = await abandonment(of: job) else { continue }
+            await abandon(job, reason: release.reason, as: release.status)
         }
     }
 
-    /// Why GitHub will never assign this job, or `nil` if it still might.
-    private func abandonmentReason(for job: Job) async -> String? {
+    /// Why GitHub will never assign this job, and how to record it, or `nil`
+    /// if it still might.
+    private func abandonment(of job: Job) async -> (reason: String, status: JobStatus)? {
         guard let jobID = Int64(job.id) else { return nil }
         do {
             let remote = try await github.job(repo: job.repo, jobID: jobID)
-            guard remote.isCompleted, let conclusion = remote.conclusion,
-                Self.abandonedConclusions.contains(conclusion)
-            else { return nil }
-            return "GitHub \(conclusion) this job — releasing the runner"
+            guard remote.isCompleted, let conclusion = remote.conclusion else { return nil }
+            if Self.abandonedConclusions.contains(conclusion) {
+                return ("GitHub \(conclusion) this job — releasing the runner", .cancelled)
+            }
+            // Finished, and by a runner that isn't ours: the job was handed back
+            // here after it had in fact run, and our runner is waiting for an
+            // assignment that already went elsewhere. Unlike our own runner
+            // finishing, nothing is mid-exit, so there is no log to truncate.
+            // GitHub names the runner, so this never mistakes the two.
+            guard let ranOn = remote.runnerName, ranOn != runnerNames[job.id] else { return nil }
+            return (
+                "GitHub finished this job on runner \(ranOn) (\(conclusion)) — releasing the runner",
+                conclusion == "success" ? .completed : .failed
+            )
         } catch let error as GitHubError where error.statusCode == 404 {
-            return "this job no longer exists on GitHub — releasing the runner"
+            return ("this job no longer exists on GitHub — releasing the runner", .cancelled)
         } catch {
             // A poll that couldn't reach GitHub tells us nothing about the job.
             return nil
@@ -68,10 +79,22 @@ extension NodeAgent {
     /// `CancellationError` and leave the job `running` with its slot held
     /// forever, which is a slower version of the bug this path exists to fix.
     /// The poll task is not cancelled, so the recording happens here.
-    private func abandon(_ job: Job, reason: String) async {
+    ///
+    /// - Parameters:
+    ///   - job: The job to stop.
+    ///   - reason: Why, recorded in the event log and on the job itself.
+    ///   - status: How the job is recorded once torn down — `cancelled`
+    ///     unless GitHub has already said how it really ended.
+    private func abandon(_ job: Job, reason: String, as status: JobStatus = .cancelled) async {
         guard let task = runningJobs[job.id] else { return }
         Log.warn("job \(job.id): \(reason)")
-        await recordEvent(job.id, RunEventName.jobCancelled, reason)
+        let event: String =
+            switch status {
+            case .completed: RunEventName.jobCompleted
+            case .failed: RunEventName.jobFailed
+            default: RunEventName.jobCancelled
+            }
+        await recordEvent(job.id, event, reason)
 
         // Still holds its slot: the VM is not gone until teardown says so, and
         // handing the slot over early is how a third VM gets cloned.
@@ -87,8 +110,8 @@ extension NodeAgent {
             // outcome through `finalize`, and that one is the truthful answer.
             guard (try? await store.job(id: job.id))?.status == .cleanup else { return }
             try? await store.updateJobStatus(
-                id: job.id, status: .cancelled, exitReason: reason, completedAt: Date())
-            Log.info("job \(job.id) released after cancellation")
+                id: job.id, status: status, exitReason: reason, completedAt: Date())
+            Log.info("job \(job.id) released (\(status.rawValue))")
         }
     }
 

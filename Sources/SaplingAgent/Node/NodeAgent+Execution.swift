@@ -5,7 +5,9 @@ import SaplingDB
 /// Running one job through a provider, and recording what happened.
 extension NodeAgent {
     func execute(_ job: Job) async {
-        let events = StoreEventSink(store: store, jobID: job.id, stats: jobStats)
+        let announcements = RunnerAnnouncements()
+        let events = StoreEventSink(
+            store: store, jobID: job.id, stats: jobStats, announcements: announcements)
         let runnerName =
             Self.runnerNamePrefix + job.platform.rawValue + "-"
             + String(UUID().uuidString.prefix(8)).lowercased()
@@ -53,8 +55,8 @@ extension NodeAgent {
             let labels = nodeLabels + RunnerImageSelector.selectors(in: job.labels)
             // Recorded before the runner exists, so housekeeping can never
             // sweep it during the seconds between minting and connecting.
-            inFlightRunners.insert(runnerName)
-            defer { inFlightRunners.remove(runnerName) }
+            runnerNames[job.id] = runnerName
+            defer { runnerNames[job.id] = nil }
 
             let jitConfig = try await github.jitConfig(
                 repo: job.repo,
@@ -95,7 +97,8 @@ extension NodeAgent {
                 outcome = try await linuxProvider.run(request, events: events)
             }
 
-            await finalize(job: job, outcome: outcome, events: events)
+            await finalize(
+                job: job, outcome: outcome, runnerRan: await announcements.jobName, events: events)
         } catch {
             // Cancellation is `abandon`'s to record, not ours. GRDB honours
             // task cancellation, so every store write from here would throw
@@ -123,14 +126,20 @@ extension NodeAgent {
     /// isn't necessarily the one that prompted us to start it. The runner's
     /// exit code therefore tells us the runner finished, not whether *this*
     /// job passed — GitHub is the authority on that.
-    func finalize(job: Job, outcome: JobOutcome, events: any EventSink) async {
+    ///
+    /// - Parameters:
+    ///   - job: The job the runner was started for.
+    ///   - outcome: How the runner exited.
+    ///   - runnerRan: The job name the runner announced, if it announced one.
+    ///   - events: Where the result is recorded.
+    func finalize(job: Job, outcome: JobOutcome, runnerRan: String?, events: any EventSink) async {
         let status: JobStatus
         let reason: String?
 
         // A clean exit is not evidence the job ran. A runner that refuses to
         // work — a deprecated version, say — exits 0 having done nothing, and
         // trusting that reported success for work that never happened.
-        switch await remoteConclusion(for: job) {
+        switch await remoteConclusion(for: job, runnerRan: runnerRan) {
         case .success:
             status = .completed
             reason = nil
@@ -191,86 +200,6 @@ extension NodeAgent {
 }
 
 extension NodeAgent {
-    /// What GitHub says became of a job.
-    enum RemoteConclusion: Equatable {
-        case success
-        /// GitHub finished the job, with this conclusion.
-        case concluded(String)
-        /// GitHub still has the job waiting for a runner, so whatever our
-        /// runner did, it wasn't this.
-        case stillQueued
-        /// No answer: GitHub unreachable, or the job never concluded.
-        case unknown
-    }
-
-    /// Ask GitHub how the job ended, allowing for its result lagging slightly
-    /// behind the runner exiting.
-    ///
-    /// GitHub is the authority for two separate reasons. A JIT runner picks up
-    /// whichever queued job matches its labels, not necessarily the one that
-    /// prompted the launch — so the exit code describes the runner, not this
-    /// job. And a runner can exit cleanly without doing any work at all, which
-    /// an exit code cannot distinguish from success.
-    /// - Parameters:
-    ///   - job: The job to ask about.
-    ///   - attempts: How many times to ask before giving up.
-    ///   - retryDelay: Gap between attempts.
-    ///   - grace: Extra time allowed while GitHub still reports the job *in
-    ///     progress*. Defaults to none when `retryDelay` is zero, so a test
-    ///     asking once still asks once.
-    /// - Returns: What GitHub says became of the job.
-    func remoteConclusion(
-        for job: Job,
-        attempts: Int? = nil,
-        retryDelay: Duration? = nil,
-        grace: Duration? = nil
-    ) async -> RemoteConclusion {
-        let attempts = attempts ?? conclusionAttempts
-        let retryDelay = retryDelay ?? conclusionRetryDelay
-        let grace = grace ?? (retryDelay == .zero ? .zero : Self.inProgressGrace)
-        guard let jobID = Int64(job.id) else { return .unknown }
-
-        let started = ContinuousClock.now
-        var lastSeenQueued = false
-        var lastSeenRunning = false
-        var attempt = 0
-
-        while true {
-            if attempt > 0 {
-                try? await Task.sleep(for: retryDelay)
-            }
-            attempt += 1
-
-            if let remote = try? await github.job(repo: job.repo, jobID: jobID) {
-                if remote.isCompleted {
-                    switch remote.conclusion {
-                    case "success": return .success
-                    case let conclusion?: return .concluded(conclusion)
-                    case nil: return .unknown
-                    }
-                }
-                // Still waiting for a runner after our runner has exited means
-                // our runner ran something else. Still *running* means the
-                // opposite — GitHub has it, and simply hasn't finished with it.
-                lastSeenQueued = remote.isQueued
-                lastSeenRunning = !remote.isQueued
-            }
-
-            if attempt >= attempts {
-                // The base attempts cover GitHub lagging a second or two behind
-                // a runner exiting. This covers something else: the runner has
-                // exited and the job is still finishing on GitHub's side, with
-                // post-steps and log upload to go. Fifteen seconds did not
-                // cover it — an iOS job GitHub concluded as `failure`, and a
-                // release that published successfully, were both recorded here
-                // as "runner exited without the job completing". Those are the
-                // failures that make a working node look broken.
-                guard lastSeenRunning, ContinuousClock.now - started < grace else { break }
-            }
-        }
-        return lastSeenQueued ? .stillQueued : .unknown
-    }
-
     /// The image this job runs in, or `nil` for macOS jobs which have none.
     ///
     /// A job that names no image never costs an API call — the node's default
