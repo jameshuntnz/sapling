@@ -86,7 +86,8 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
         // `after` is the last event id the client already has, so a tailing
         // client fetches only what's new.
         let after = try? request.query.get(Int64.self, at: "after")
-        guard let logs = try await controlPlane.logs(jobID: id, after: after) else {
+        let before = try? request.query.get(Int64.self, at: "before")
+        guard let logs = try await controlPlane.logs(jobID: id, after: after, before: before) else {
             return errorResponse(.notFound, "not_found", "no job with id \(id)")
         }
         return try jsonResponse(logs)
@@ -130,6 +131,26 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
 
     v1.get("config") { _ async throws -> Response in
         try jsonResponse(try await controlPlane.configuration())
+    }
+
+    v1.get("disk") { _ async throws -> Response in
+        guard let agent = controlPlane.agent else {
+            return errorResponse(.serviceUnavailable, "no_agent", "no node agent is running in this process")
+        }
+        return try jsonResponse(await agent.diskReport())
+    }
+
+    v1.post("disk", "cleanup") { request async throws -> Response in
+        let body = try request.content.decode(DiskCleanupRequest.self)
+        guard let agent = controlPlane.agent else {
+            return errorResponse(.serviceUnavailable, "no_agent", "no node agent is running in this process")
+        }
+        return try jsonResponse(await agent.cleanDisk(body))
+    }
+
+    v1.put("config") { request async throws -> Response in
+        let body = try request.content.decode(ConfigUpdateRequest.self)
+        return try jsonResponse(await controlPlane.updateConfig(body))
     }
 
     v1.post("config", "reload") { _ async throws -> Response in

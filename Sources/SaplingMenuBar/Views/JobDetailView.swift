@@ -13,7 +13,6 @@ struct JobDetailView: View {
     let onBack: () -> Void
 
     @Environment(AppModel.self) private var model
-    @State private var autoScroll = true
     @State private var confirmingCancel = false
 
     private var job: Job { detail.job }
@@ -28,7 +27,7 @@ struct JobDetailView: View {
                     .padding(.vertical, 9)
             }
             Divider()
-            log
+            JobLogView(pager: model.logPager)
         }
     }
 
@@ -76,6 +75,10 @@ struct JobDetailView: View {
                 }
             }
 
+            if let since = model.stuckSince(jobID: job.id) {
+                stuckNotice(since: since)
+            }
+
             actions
 
             if let message = model.lastActionMessage {
@@ -108,6 +111,38 @@ struct JobDetailView: View {
         .padding(.vertical, 10)
     }
 
+    /// Stop or retry, and a way out to GitHub.
+    private var actions: some View {
+        HStack(spacing: 6) {
+            jobControl
+            if let url = job.gitHubURL {
+                Link(destination: url) {
+                    Label("Open on GitHub", systemImage: "arrow.up.right.square")
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .help(url.absoluteString)
+            }
+        }
+    }
+
+    /// Said plainly, because nothing else on screen would: the job reads as
+    /// running, the runner's last line is a healthy "Listening for Jobs", and
+    /// the slot stays held until the job timeout.
+    private func stuckNotice(since: Date) -> some View {
+        Label {
+            Text(
+                "Runner has waited \(Date().timeIntervalSince(since).durationDescription) for GitHub "
+                    + "to assign this job. If GitHub already ran it elsewhere, it never will — "
+                    + "stopping it frees the slot.")
+        } icon: {
+            Image(systemName: "hourglass")
+        }
+        .font(.caption)
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
     /// Cancel while the job is live, retry once it is over — never both,
     /// because they are never both meaningful.
     ///
@@ -116,7 +151,7 @@ struct JobDetailView: View {
     /// takes. Guarding both equally would train the reflex that dismisses the
     /// guard.
     @ViewBuilder
-    private var actions: some View {
+    private var jobControl: some View {
         if job.status.isTerminal {
             Button {
                 Task { await model.retry(jobID: job.id) }
@@ -147,97 +182,6 @@ struct JobDetailView: View {
                         + "cancelled on GitHub — it stays queued there until its own timeout, "
                         + "and this node will not pick it up again.")
             }
-        }
-    }
-
-    private var log: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    if detail.events.isEmpty {
-                        Text("No events yet.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 8)
-                    }
-                    ForEach(detail.events) { event in
-                        EventLine(event: event)
-                            .id(event.id)
-                    }
-                }
-                .padding(.horizontal, Metrics.horizontalPadding)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .onChange(of: detail.events.count) {
-                guard autoScroll, let last = detail.events.last?.id else { return }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo(last, anchor: .bottom)
-                }
-            }
-            .onAppear {
-                guard let last = detail.events.last?.id else { return }
-                proxy.scrollTo(last, anchor: .bottom)
-            }
-        }
-    }
-}
-
-/// One log line.
-///
-/// Lifecycle events are labelled and tinted; plain log output is left alone so
-/// build output looks like build output.
-struct EventLine: View {
-    let event: RunEvent
-
-    private var isLifecycle: Bool { event.event != RunEventName.log }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 7) {
-            Text(event.ts, format: .dateTime.hour().minute().second())
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.quaternary)
-                .fixedSize()
-
-            if isLifecycle {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(event.event.replacingOccurrences(of: "_", with: " "))
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(tint)
-                    if let detail = event.detail {
-                        Text(detail)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-            } else {
-                Text(event.detail ?? "")
-                    .font(.system(size: 11, design: .monospaced))
-                    // The runner's own annotations, so the line that failed
-                    // the build is findable without reading the whole log.
-                    .foregroundStyle(annotationTint ?? .primary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    /// Red for `##[error]`, orange for `##[warning]`, nothing otherwise.
-    private var annotationTint: Color? {
-        guard let detail = event.detail else { return nil }
-        if detail.contains("##[error]") { return .red }
-        if detail.contains("##[warning]") { return .orange }
-        return nil
-    }
-
-    private var tint: Color {
-        switch event.event {
-        case RunEventName.jobFailed: .red
-        case RunEventName.jobCompleted: .green
-        case RunEventName.cleanupStarted, RunEventName.cleanupFinished: .orange
-        default: .blue
         }
     }
 }

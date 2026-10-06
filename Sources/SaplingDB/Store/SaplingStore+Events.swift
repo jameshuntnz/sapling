@@ -45,4 +45,62 @@ extension SaplingStore {
                 .map(\.model)
         }
     }
+
+    /// The newest events of a job's log, oldest first.
+    ///
+    /// What a viewer wants first. Reading from the start stopped at the limit,
+    /// so a chatty runner — one dumps its whole job message as ~3,000 lines —
+    /// hid everything that happened after its first minute, including the
+    /// outcome.
+    ///
+    /// - Parameters:
+    ///   - jobID: The job whose log to read.
+    ///   - beforeID: Return only events older than this row id, to page back.
+    ///   - limit: Maximum rows to return.
+    /// - Returns: Up to `limit` events, oldest first, and whether any older
+    ///   ones remain.
+    /// - Throws: If the database cannot be read.
+    public func latestEvents(
+        jobID: String, beforeID: Int64? = nil, limit: Int = 1000
+    ) async throws -> (events: [RunEvent], hasEarlier: Bool) {
+        try await writer.read { db in
+            var request = RunEventRecord.filter(Column("job_id") == jobID)
+            if let beforeID { request = request.filter(Column("id") < beforeID) }
+            let newestFirst = try request.order(Column("id").desc).limit(limit).fetchAll(db)
+            guard let oldest = newestFirst.last?.id else { return ([], false) }
+            let hasEarlier =
+                try RunEventRecord
+                .filter(Column("job_id") == jobID && Column("id") < oldest)
+                .fetchCount(db) > 0
+            return (newestFirst.reversed().map(\.model), hasEarlier)
+        }
+    }
+
+    /// Deletes the event logs of jobs that finished before a cutoff, then
+    /// gives the space back to the filesystem.
+    ///
+    /// The job rows stay — outcomes and history are cheap — only the logs
+    /// go, which are almost all of the database: one chatty runner writes
+    /// thousands of lines per job, and nothing else ever removed them.
+    ///
+    /// - Parameter cutoff: Jobs completed before this lose their logs.
+    /// - Returns: How many events were deleted.
+    /// - Throws: If the database cannot be written.
+    @discardableResult
+    public func trimEvents(completedBefore cutoff: Date) async throws -> Int {
+        let deleted = try await writer.write { db in
+            try db.execute(
+                sql: """
+                    DELETE FROM runs WHERE job_id IN (
+                        SELECT id FROM jobs WHERE completed_at IS NOT NULL AND completed_at < ?
+                    )
+                    """,
+                arguments: [cutoff])
+            return db.changesCount
+        }
+        // Outside any transaction, which SQLite requires of VACUUM. Without it
+        // the deleted pages stay in the file and the disk sees nothing back.
+        try await writer.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
+        return deleted
+    }
 }

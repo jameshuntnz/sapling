@@ -185,10 +185,13 @@ GET  /api/v1/nodes                list nodes
 POST /api/v1/nodes/join-token     generate an enrollment token
 GET  /api/v1/jobs?status=&limit=  list jobs
 GET  /api/v1/jobs/:id             job detail
-GET  /api/v1/jobs/:id/logs?after= event log, tailable
+GET  /api/v1/jobs/:id/logs?after= event log, tailable (before= pages back)
 GET  /api/v1/jobs/:id/resources   that job's VM or container, against its limits
 GET  /api/v1/config               effective config, credentials redacted
 POST /api/v1/config/reload        re-read config.toml without a restart
+PUT  /api/v1/config               change live-reloadable keys, then reload
+GET  /api/v1/disk                 what is using the node's disk
+POST /api/v1/disk/cleanup         delete an unused VM, prune images, trim logs
 POST /api/v1/jobs/:id/cancel      stop a job and free its slot
 POST /api/v1/jobs/:id/retry       queue a finished job to run again
 POST /api/v1/drain                stop accepting new jobs

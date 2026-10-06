@@ -5,8 +5,19 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Binding var isPresented: Bool
     @State private var draft: String = ""
+    @State private var showingConfig = false
+    @AppStorage(JobNotifier.failuresKey) private var notifyFailures = true
+    @AppStorage(JobNotifier.unreachableKey) private var notifyUnreachable = true
 
     var body: some View {
+        if showingConfig {
+            ConfigEditorView(isPresented: $showingConfig)
+        } else {
+            settings
+        }
+    }
+
+    private var settings: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Button {
@@ -40,6 +51,35 @@ struct SettingsView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Notifications").font(.callout.weight(.medium))
+                Toggle("A job fails, gives up, or is refused", isOn: $notifyFailures)
+                Toggle("The node can't be reached", isOn: $notifyUnreachable)
+            }
+            .toggleStyle(.checkbox)
+            .font(.caption)
+
+            Divider()
+
+            Button {
+                showingConfig = true
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Node configuration").font(.callout.weight(.medium))
+                        Text("Memory, slots, labels and timeouts — applied without a restart.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             Spacer()
 

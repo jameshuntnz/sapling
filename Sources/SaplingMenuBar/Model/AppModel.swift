@@ -28,6 +28,10 @@ final class AppModel {
     /// store — and a node too busy to answer for one should still answer for
     /// the other.
     var selectedJobResources: JobResourcesResponse?
+    /// The selected job's log, kept whole across polls and paging.
+    let logPager = LogPager()
+    /// Announces failures and outages while the panel is closed.
+    let notifier = JobNotifier()
     /// What the last action actually did — a job cancelled, a node paused.
     ///
     /// Shown rather than swallowed: several of these have consequences you
@@ -83,6 +87,7 @@ final class AppModel {
     }
 
     func start() {
+        Task { await notifier.requestAuthorization() }
         restart()
     }
 
@@ -107,6 +112,7 @@ final class AppModel {
 
             self.status = status
             self.jobs = jobs
+            notifier.observe(jobs: jobs)
             // Only while someone is looking: the history is for the chart, and
             // fetching it every 30s in the background is pure noise.
             if isMenuOpen {
@@ -127,13 +133,16 @@ final class AppModel {
 
             if let selectedJobID {
                 self.selectedJobDetail = try? await client.job(id: selectedJobID)
+                if let detail = selectedJobDetail { await logPager.sync(with: detail, client: client) }
                 self.selectedJobResources = try? await client.jobResources(
                     jobID: selectedJobID, limit: 60)
             }
         } catch let error as ClientError {
             self.connection = .failed(error.message)
+            notifier.observeFailure(error.message, expected: isRestarting)
         } catch {
             self.connection = .failed(error.localizedDescription)
+            notifier.observeFailure(error.localizedDescription, expected: isRestarting)
         }
     }
 
@@ -142,9 +151,11 @@ final class AppModel {
         selectedJobDetail = nil
         selectedJobResources = nil
         lastActionMessage = nil
+        logPager.reset(jobID: jobID)
         guard let jobID else { return }
         Task {
             selectedJobDetail = try? await client.job(id: jobID)
+            if let detail = selectedJobDetail { await logPager.sync(with: detail, client: client) }
             selectedJobResources = try? await client.jobResources(jobID: jobID, limit: 60)
         }
     }
@@ -244,44 +255,5 @@ final class AppModel {
 
     var queuedJobs: [Job] {
         jobs.filter { $0.status == .queued }
-    }
-
-    /// What the menu bar icon should say at a glance.
-    var iconSymbol: String {
-        switch connection {
-        case .failed: "exclamationmark.triangle.fill"
-        case .connecting: "leaf"
-        case .connected:
-            if let status, status.node.status != .online {
-                "pause.circle.fill"
-            } else if !runningJobs.isEmpty {
-                "leaf.fill"
-            } else {
-                "leaf"
-            }
-        }
-    }
-
-    var iconTint: Color? {
-        switch connection {
-        case .failed: .orange
-        case .connecting: nil
-        case .connected:
-            if let status, status.node.status != .online {
-                .yellow
-            } else if !runningJobs.isEmpty {
-                .green
-            } else {
-                nil
-            }
-        }
-    }
-
-    /// Slot usage next to the icon, so the common question ("is anything
-    /// running?") is answered without opening anything.
-    var menuBarLabel: String? {
-        guard case .connected = connection, let status else { return nil }
-        let inUse = status.slots.reduce(0) { $0 + $1.inUse }
-        return inUse > 0 ? "\(inUse)" : nil
     }
 }

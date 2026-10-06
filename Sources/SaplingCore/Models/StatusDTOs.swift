@@ -83,6 +83,18 @@ public struct StatusResponse: Codable, Sendable {
     public var forkRunsRefused: Int
     /// What the hardware is doing, when the node is reporting it.
     public var metrics: NodeMetrics?
+    /// Running jobs whose runner is connected but has not been given a job,
+    /// keyed by job id, with when it started waiting.
+    ///
+    /// A few seconds of this is every job's start. Minutes of it is a runner
+    /// waiting for an assignment GitHub has already given elsewhere — a job
+    /// that looks exactly like a running one while holding a slot until its
+    /// timeout. Optional so older daemons, which cannot tell, still decode.
+    public var awaitingAssignment: [String: Date]?
+    /// Size of the node's data volume, when the daemon reports it.
+    public var diskTotalBytes: Int64?
+    /// Free space on it.
+    public var diskFreeBytes: Int64?
 
     /// Creates a status summary.
     public init(
@@ -101,7 +113,10 @@ public struct StatusResponse: Codable, Sendable {
         lastPollAt: Date?,
         lastPollError: String?,
         forkRunsRefused: Int = 0,
-        metrics: NodeMetrics? = nil
+        metrics: NodeMetrics? = nil,
+        awaitingAssignment: [String: Date]? = nil,
+        diskTotalBytes: Int64? = nil,
+        diskFreeBytes: Int64? = nil
     ) {
         self.version = version
         self.node = node
@@ -119,5 +134,8 @@ public struct StatusResponse: Codable, Sendable {
         self.lastPollError = lastPollError
         self.forkRunsRefused = forkRunsRefused
         self.metrics = metrics
+        self.awaitingAssignment = awaitingAssignment
+        self.diskTotalBytes = diskTotalBytes
+        self.diskFreeBytes = diskFreeBytes
     }
 }

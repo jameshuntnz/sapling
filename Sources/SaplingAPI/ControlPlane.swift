@@ -76,6 +76,7 @@ struct ControlPlane: Sendable {
             watched = (try? JSONDecoder().decode([String].self, from: Data(raw.utf8))) ?? []
         }
 
+        let disk = DiskSpace.volume(at: SaplingPaths.home)
         return StatusResponse(
             version: SaplingVersion.current,
             node: node,
@@ -93,7 +94,10 @@ struct ControlPlane: Sendable {
             lastPollError: try await store.state(SaplingStore.StateKey.lastPollError),
             forkRunsRefused: Int(
                 try await store.state(SaplingStore.StateKey.forkRunsRefused) ?? "") ?? 0,
-            metrics: await agent?.metrics.current()
+            metrics: await agent?.metrics.current(),
+            awaitingAssignment: await agent?.awaitingAssignment(),
+            diskTotalBytes: disk?.total,
+            diskFreeBytes: disk?.free
         )
     }
 
@@ -118,14 +122,21 @@ struct ControlPlane: Sendable {
 
     func job(id: String) async throws -> JobDetailResponse? {
         guard let job = try await store.job(id: id) else { return nil }
-        let events = try await store.events(jobID: id)
-        return JobDetailResponse(job: job, events: events)
+        // The newest page, not the first: the outcome is at the end.
+        let page = try await store.latestEvents(jobID: id, limit: LogsResponse.pageSize)
+        return JobDetailResponse(job: job, events: page.events, hasEarlier: page.hasEarlier)
     }
 
-    /// `after` lets the log viewer tail without re-fetching the whole log.
-    func logs(jobID: String, after: Int64?) async throws -> LogsResponse? {
+    /// `after` lets the log viewer tail without re-fetching the whole log;
+    /// `before` lets it page back from the newest events.
+    func logs(jobID: String, after: Int64?, before: Int64? = nil) async throws -> LogsResponse? {
         guard try await store.job(id: jobID) != nil else { return nil }
-        let events = try await store.events(jobID: jobID, afterID: after)
+        if after == nil, let before {
+            let page = try await store.latestEvents(
+                jobID: jobID, beforeID: before, limit: LogsResponse.pageSize)
+            return LogsResponse(jobID: jobID, events: page.events, hasEarlier: page.hasEarlier)
+        }
+        let events = try await store.events(jobID: jobID, afterID: after, limit: LogsResponse.pageSize)
         return LogsResponse(jobID: jobID, events: events)
     }
 
