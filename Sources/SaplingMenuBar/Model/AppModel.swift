@@ -28,6 +28,21 @@ final class AppModel {
     /// store — and a node too busy to answer for one should still answer for
     /// the other.
     var selectedJobResources: JobResourcesResponse?
+    /// What the last action actually did — a job cancelled, a node paused.
+    ///
+    /// Shown rather than swallowed: several of these have consequences you
+    /// cannot see from the panel, and a button that reports nothing teaches you
+    /// to check the terminal anyway.
+    var lastActionMessage: String?
+    /// What the node's release channel has to offer, as far as the app knows.
+    var updateState: UpdateState = .none
+    /// When the daemon last answered an update check.
+    ///
+    /// The check is a GitHub round trip made by the node, so it is rationed
+    /// rather than made part of the three-second poll.
+    var updateCheckedAt: Date?
+    /// How long to keep treating a dropped connection as an expected restart.
+    var restartingUntil: Date?
     var lastUpdated: Date?
     /// Recent hardware samples, for the trend behind each meter.
     var metricsHistory: [NodeMetrics] = []
@@ -46,10 +61,15 @@ final class AppModel {
     ///
     /// Polling a Mac mini over Tailscale every second all day is not worth it.
     var isMenuOpen = false {
-        didSet { restart() }
+        didSet {
+            if !isMenuOpen { lastActionMessage = nil }
+            restart()
+        }
     }
 
     static let serverKey = "sapling.server"
+    /// How long an update check is treated as still current.
+    static let updateCheckInterval: TimeInterval = 900
     private var pollTask: Task<Void, Never>?
 
     init() {
@@ -58,7 +78,7 @@ final class AppModel {
             ?? ServerEndpoint.resolve().absoluteString
     }
 
-    private var client: SaplingClient {
+    var client: SaplingClient {
         SaplingClient(baseURL: ServerEndpoint.resolve(explicit: serverAddress), timeout: 8)
     }
 
@@ -95,6 +115,15 @@ final class AppModel {
             }
             self.connection = .connected
             self.lastUpdated = Date()
+            // Reaching the daemon at all means any restart we were excusing is
+            // over. If it was an install, confirm what is actually running now
+            // rather than leaving the banner asserting it from before.
+            self.restartingUntil = nil
+            if case .installing = updateState {
+                self.updateState = .none
+                self.updateCheckedAt = nil
+            }
+            await checkForUpdateIfDue()
 
             if let selectedJobID {
                 self.selectedJobDetail = try? await client.job(id: selectedJobID)
@@ -112,6 +141,7 @@ final class AppModel {
         selectedJobID = jobID
         selectedJobDetail = nil
         selectedJobResources = nil
+        lastActionMessage = nil
         guard let jobID else { return }
         Task {
             selectedJobDetail = try? await client.job(id: jobID)
@@ -121,18 +151,49 @@ final class AppModel {
 
     // MARK: - Control
 
+    /// Stop accepting new jobs, with the intention of resuming.
     func cordon() async {
-        _ = try? await client.cordon()
-        await refresh()
+        await perform { try await $0.cordon().message }
     }
 
+    /// Accept jobs again, from either paused or draining.
     func uncordon() async {
-        _ = try? await client.uncordon()
-        await refresh()
+        await perform { try await $0.uncordon().message }
     }
 
+    /// Stop accepting new jobs and let the running ones finish.
+    ///
+    /// The reply names how many it is waiting on, which is the whole reason to
+    /// choose this over pausing — so it is shown rather than discarded.
     func drain() async {
-        _ = try? await client.drain()
+        await perform { try await $0.drain().message }
+    }
+
+    // MARK: - Job control
+
+    /// Stop a job that is running or waiting here.
+    func cancel(jobID: String) async {
+        await perform { try await $0.cancelJob(id: jobID).message }
+    }
+
+    /// Queue a finished job to run again.
+    func retry(jobID: String) async {
+        await perform { try await $0.retryJob(id: jobID).message }
+    }
+
+    /// Run an action and keep whatever the daemon said about it.
+    ///
+    /// A failure is reported in the same place as a success. These used to be
+    /// `try?`, which meant a pause that never landed looked identical to one
+    /// that did.
+    func perform(_ action: (SaplingClient) async throws -> String) async {
+        do {
+            lastActionMessage = try await action(client)
+        } catch let error as ClientError {
+            lastActionMessage = error.message
+        } catch {
+            lastActionMessage = error.localizedDescription
+        }
         await refresh()
     }
 

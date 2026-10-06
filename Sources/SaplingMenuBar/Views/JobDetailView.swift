@@ -12,7 +12,9 @@ struct JobDetailView: View {
     let resources: JobResourcesResponse?
     let onBack: () -> Void
 
+    @Environment(AppModel.self) private var model
     @State private var autoScroll = true
+    @State private var confirmingCancel = false
 
     private var job: Job { detail.job }
 
@@ -74,6 +76,16 @@ struct JobDetailView: View {
                 }
             }
 
+            actions
+
+            if let message = model.lastActionMessage {
+                Text(Format.oneLine(message))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(message)
+            }
+
             if let reason = job.exitReason {
                 let kind = FailureKind.of(reason: reason)
                 // Named when it is not the build's fault. A memory kill and a
@@ -94,6 +106,48 @@ struct JobDetailView: View {
         }
         .padding(.horizontal, Metrics.horizontalPadding)
         .padding(.vertical, 10)
+    }
+
+    /// Cancel while the job is live, retry once it is over — never both,
+    /// because they are never both meaningful.
+    ///
+    /// Cancelling is behind a confirmation and retrying is not: one throws away
+    /// work in progress, the other only costs a slot for as long as the job
+    /// takes. Guarding both equally would train the reflex that dismisses the
+    /// guard.
+    @ViewBuilder
+    private var actions: some View {
+        if job.status.isTerminal {
+            Button {
+                Task { await model.retry(jobID: job.id) }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .controlSize(.small)
+            .help("Queue this job to run again on the next poll.")
+        } else {
+            Button(role: .destructive) {
+                confirmingCancel = true
+            } label: {
+                Label("Stop job", systemImage: "stop.fill")
+            }
+            .controlSize(.small)
+            .help("Stop this job and free its slot.")
+            .confirmationDialog(
+                "Stop \(job.name ?? "job \(job.id)")?",
+                isPresented: $confirmingCancel
+            ) {
+                Button("Stop job", role: .destructive) {
+                    Task { await model.cancel(jobID: job.id) }
+                }
+                Button("Keep running", role: .cancel) {}
+            } message: {
+                Text(
+                    "The environment is torn down and the slot is freed. The job is not "
+                        + "cancelled on GitHub — it stays queued there until its own timeout, "
+                        + "and this node will not pick it up again.")
+            }
+        }
     }
 
     private var log: some View {
@@ -160,11 +214,22 @@ struct EventLine: View {
             } else {
                 Text(event.detail ?? "")
                     .font(.system(size: 11, design: .monospaced))
+                    // The runner's own annotations, so the line that failed
+                    // the build is findable without reading the whole log.
+                    .foregroundStyle(annotationTint ?? .primary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// Red for `##[error]`, orange for `##[warning]`, nothing otherwise.
+    private var annotationTint: Color? {
+        guard let detail = event.detail else { return nil }
+        if detail.contains("##[error]") { return .red }
+        if detail.contains("##[warning]") { return .orange }
+        return nil
     }
 
     private var tint: Color {

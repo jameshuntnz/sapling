@@ -17,7 +17,7 @@ struct PanelView: View {
                 overview
             }
             Divider()
-            footer
+            PanelFooter(showingSettings: $showingSettings)
         }
         .frame(width: Metrics.panelWidth, height: Metrics.panelHeight)
     }
@@ -30,8 +30,22 @@ struct PanelView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
-                    if case .failed(let message) = model.connection {
+                    // A connection that dropped because we asked the daemon
+                    // to restart is not a fault, and reporting it as one sends
+                    // you looking for a problem you caused on purpose. The
+                    // banner says what is actually happening.
+                    if case .failed(let message) = model.connection, !model.isRestarting {
                         ConnectionErrorView(message: message) { showingSettings = true }
+                    }
+
+                    UpdateBanner()
+
+                    if let message = model.lastActionMessage {
+                        Text(Format.oneLine(message))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .help(message)
                     }
 
                     if let status = model.status {
@@ -119,27 +133,6 @@ struct PanelView: View {
         .padding(.vertical, 10)
     }
 
-    /// What the node is running.
-    ///
-    /// Deliberately not compared against this app's own version. The source
-    /// placeholder only moves on a stable release, so an app built from main —
-    /// which is how the README says to install it — reports that placeholder
-    /// while the node runs dev builds. Flagging that as a mismatch would be
-    /// orange permanently, which is noise rather than signal.
-    ///
-    /// Build metadata is dropped for width; the tooltip carries it, since the
-    /// commit is the part you want when asking why a node behaves oddly.
-    @ViewBuilder
-    private var nodeVersion: some View {
-        if let version = model.status?.version {
-            Text(SemanticVersion(version)?.withoutBuildMetadata ?? version)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .help("Node is running \(version).")
-        }
-    }
-
     /// The queue, with each job's reason for waiting beneath it.
     ///
     /// A queued job with no explanation invites the wrong conclusion. The
@@ -181,65 +174,5 @@ struct PanelView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            if let node = model.status?.node {
-                if node.status == .online {
-                    Button {
-                        Task { await model.cordon() }
-                    } label: {
-                        Label("Pause", systemImage: "pause.fill")
-                    }
-                    .help("Stop accepting new jobs. Running jobs continue.")
-                } else {
-                    Button {
-                        Task { await model.uncordon() }
-                    } label: {
-                        Label("Resume", systemImage: "play.fill")
-                    }
-                    .help("Start accepting jobs again.")
-                }
-            }
-
-            Spacer()
-
-            nodeVersion
-
-            if let updated = model.lastUpdated {
-                Text(updated.relativeDescription)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("Refresh now")
-
-            Button {
-                model.select(jobID: nil)
-                showingSettings.toggle()
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .help("Settings")
-
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-            }
-            .help("Quit Sapling")
-        }
-        .buttonStyle(.borderless)
-        .font(.caption)
-        .padding(.horizontal, Metrics.horizontalPadding)
-        .padding(.vertical, 8)
     }
 }

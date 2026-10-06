@@ -126,3 +126,57 @@ extension SaplingStore {
         return .requeued(attempt: record.attempts + 1)
     }
 }
+
+/// Queueing a job again because a person asked, rather than because the poll
+/// loop decided to.
+extension SaplingStore {
+    /// What happened when someone asked for a job to be run again.
+    public enum RetryOutcome: Sendable, Equatable {
+        /// Back in the queue, and will be dispatched on the next cycle.
+        case queued
+        /// No job with that id.
+        case notFound
+        /// Still in flight here, so there is nothing to retry yet.
+        case stillActive(JobStatus)
+    }
+
+    /// Put a finished job back in the queue at a person's request.
+    ///
+    /// Deliberately ignores everything `requeueJob` respects — the cooldown,
+    /// the attempt ceiling, and the give-up marker. Those exist to stop a
+    /// broken node retrying itself into the ground unattended; someone
+    /// clicking retry has already made that judgement, and a button that
+    /// silently does nothing on the third press is worse than no button. The
+    /// count resets so the automatic ceiling applies afresh to what follows.
+    ///
+    /// A cancelled job is eligible here even though `JobStatus.isRetryable`
+    /// excludes it. That rule governs the node's *own* judgement: a
+    /// cancellation is GitHub's decision and the node should not overrule it
+    /// unprompted. When a person overrules it, the worst case is self
+    /// correcting — if GitHub really has finished with the job,
+    /// `retireAbandonedQueuedJobs` drops it again on the next poll with a
+    /// reason, before anything is provisioned for it.
+    ///
+    /// - Parameter id: The job to queue again.
+    /// - Returns: Whether the job was queued, and if not, why not.
+    /// - Throws: If the database cannot be written.
+    @discardableResult
+    public func retryJob(id: String) async throws -> RetryOutcome {
+        try await writer.write { db in
+            guard var record = try JobRecord.fetchOne(db, key: id) else { return .notFound }
+            let status = JobStatus(rawValue: record.status)
+            // A job still holding a slot is cancelled, not retried. Queueing it
+            // a second time while its VM is alive is how one job gets two.
+            if let status, !status.isTerminal { return .stillActive(status) }
+
+            record.attempts = 0
+            record.status = JobStatus.queued.rawValue
+            record.startedAt = nil
+            record.completedAt = nil
+            record.exitReason = nil
+            record.updatedAt = Date()
+            try record.update(db)
+            return .queued
+        }
+    }
+}

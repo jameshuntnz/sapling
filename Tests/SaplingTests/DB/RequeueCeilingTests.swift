@@ -135,3 +135,73 @@ struct RequeueCeilingTests {
         #expect(try await store.slotsInUse().isEmpty)
     }
 }
+
+/// Retrying because a person asked, which answers to different rules.
+@Suite("Manual retry")
+struct ManualRetryTests {
+
+    func makeStore() throws -> SaplingStore {
+        try SaplingStore(inMemoryNamed: UUID().uuidString)
+    }
+
+    func job(_ store: SaplingStore, status: JobStatus, attempts: Int = 0) async throws {
+        try await store.saveJob(
+            Job(
+                id: "1", repo: "acme/widgets", workflowRunID: "100", platform: .macos,
+                labels: ["self-hosted", "macos"], status: status,
+                completedAt: status.isTerminal ? Date() : nil,
+                exitReason: status.isTerminal ? "VM would not boot" : nil))
+        for _ in 0..<attempts {
+            try await store.claimJob(id: "1")
+            try await store.updateJobStatus(id: "1", status: status, completedAt: Date())
+        }
+    }
+
+    /// The whole reason this exists rather than reusing `requeueJob`: a button
+    /// that silently does nothing on the third press is worse than no button.
+    @Test("retrying ignores the attempt ceiling the poll loop respects")
+    func bypassesTheCeiling() async throws {
+        let store = try makeStore()
+        try await job(store, status: .failed, attempts: 4)
+        // The automatic path has given up on this job for good.
+        #expect(
+            try await store.requeueJob(id: "1", failedBefore: Date(), maxAttempts: 3) == .notEligible)
+
+        #expect(try await store.retryJob(id: "1") == .queued)
+        let queued = try #require(try await store.job(id: "1"))
+        #expect(queued.status == .queued)
+        #expect(queued.completedAt == nil)
+        #expect(queued.exitReason == nil)
+
+        // The count starts over, so the ceiling applies afresh to what follows.
+        #expect(try await store.claimJob(id: "1") == 1)
+    }
+
+    /// A cancellation is GitHub's decision, which only a person may overrule.
+    ///
+    /// The node must not do it unprompted. If GitHub really has finished with
+    /// the job, the poll loop retires it again before anything is provisioned.
+    @Test("a cancelled job can be retried by hand even though the poll loop won't")
+    func cancelledJobIsRetryable() async throws {
+        let store = try makeStore()
+        try await job(store, status: .cancelled)
+        #expect(
+            try await store.requeueJob(id: "1", failedBefore: Date(), maxAttempts: 3) == .notEligible)
+        #expect(try await store.retryJob(id: "1") == .queued)
+        #expect(try await store.job(id: "1")?.status == .queued)
+    }
+
+    /// Queueing a job whose VM is still alive is how one job gets two.
+    @Test("a job still holding a slot is refused rather than queued twice")
+    func activeJobIsRefused() async throws {
+        let store = try makeStore()
+        try await job(store, status: .running)
+        #expect(try await store.retryJob(id: "1") == .stillActive(.running))
+        #expect(try await store.job(id: "1")?.status == .running)
+    }
+
+    @Test("an unknown job is reported as missing")
+    func unknownJob() async throws {
+        #expect(try await makeStore().retryJob(id: "nope") == .notFound)
+    }
+}

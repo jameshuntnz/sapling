@@ -126,6 +126,30 @@ public struct SaplingClient: Sendable {
         return try await send("GET", path, as: JobResourcesResponse.self)
     }
 
+    /// Stops a job that is running or waiting on this node.
+    ///
+    /// Frees the node's slot. The job is not cancelled on GitHub, which stays
+    /// queued there until its own timeout.
+    ///
+    /// - Parameter id: The job to stop.
+    /// - Returns: What happened, and whether anything changed.
+    /// - Throws: `ClientError` if the daemon is unreachable or has no such job.
+    public func cancelJob(id: String) async throws -> JobActionResponse {
+        try await send("POST", "api/v1/jobs/\(id)/cancel", as: JobActionResponse.self)
+    }
+
+    /// Queues a finished job to run again.
+    ///
+    /// Ignores the node's attempt ceiling: a person asking for another go has
+    /// already made that judgement.
+    ///
+    /// - Parameter id: The job to run again.
+    /// - Returns: What happened, and whether anything changed.
+    /// - Throws: `ClientError` if the daemon is unreachable or has no such job.
+    public func retryJob(id: String) async throws -> JobActionResponse {
+        try await send("POST", "api/v1/jobs/\(id)/retry", as: JobActionResponse.self)
+    }
+
     /// Fetches recent hardware samples for a chart.
     ///
     /// - Parameter limit: Most recent N samples, or all held when `nil`.
