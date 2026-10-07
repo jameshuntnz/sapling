@@ -90,4 +90,16 @@ struct QueueExplainerTests {
             sizeOf: { _ in 2 })
         #expect(reasons["1"] == .nodeFull(capacity: 2))
     }
+
+    /// The store hands jobs back newest first; the queue runs oldest first.
+    @Test("queued jobs are ordered oldest first, as the scheduler runs them")
+    func schedulingOrder() {
+        let now = Date()
+        var older = job("1", .linux, "android")
+        older.queuedAt = now.addingTimeInterval(-60)
+        var newer = job("2", .linux, "lint")
+        newer.queuedAt = now
+        let ordered = QueueExplainer.schedulingOrder([newer, older])
+        #expect(ordered.map(\.id) == ["1", "2"])
+    }
 }

@@ -253,7 +253,8 @@ final class AppModel {
             sizeOf: { $0.memoryGB ?? 0 })
     }
 
+    /// Queued jobs in the order they will run, which `queueReasons` relies on.
     var queuedJobs: [Job] {
-        jobs.filter { $0.status == .queued }
+        QueueExplainer.schedulingOrder(jobs.filter { $0.status == .queued })
     }
 }

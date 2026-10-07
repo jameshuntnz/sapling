@@ -44,6 +44,14 @@ public enum QueueReason: Sendable, Hashable {
 /// code between them — an explanation that disagrees with the scheduler is
 /// worse than none, because it will be believed.
 public enum QueueExplainer {
+    /// Queued jobs in the order the scheduler admits them: oldest first.
+    ///
+    /// The store lists jobs newest first, so anything showing or explaining the
+    /// queue must reorder through this or it reads backwards.
+    public static func schedulingOrder(_ jobs: [Job]) -> [Job] {
+        jobs.sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
+    }
+
     /// Explains a queue against a node's current commitments.
     ///
     /// - Parameters:
