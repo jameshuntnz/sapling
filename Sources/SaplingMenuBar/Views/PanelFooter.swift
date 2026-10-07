@@ -20,6 +20,8 @@ struct PanelFooter: View {
             // When it last refreshed lives in the tooltip: it is "just now"
             // whenever the panel is open, which is the only time it is read.
             Button {
+                // A manual refresh re-asks about updates too.
+                model.updateCheckedAt = nil
                 Task { await model.refresh() }
             } label: {
                 Image(systemName: "arrow.clockwise")
