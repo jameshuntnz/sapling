@@ -64,8 +64,7 @@ extension NodeAgent {
             fallbackGB: max(defaultMemoryGB(for: .macos), defaultMemoryGB(for: .linux)),
             overheadGB: config.node.overheadByPlatform)
         let budgetGB = memoryBudgetGB
-        let queued = try await store.jobs(status: .queued, limit: 50)
-            .sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
+        let queued = QueueExplainer.schedulingOrder(try await store.jobs(status: .queued, limit: 50))
 
         for job in queued {
             let used = inUse[job.platform] ?? 0
