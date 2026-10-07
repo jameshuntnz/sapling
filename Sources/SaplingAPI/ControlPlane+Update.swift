@@ -41,6 +41,15 @@ extension ControlPlane {
     ///   them, and whether or not the release outranks what is running.
     /// - Returns: What is being applied, or why nothing is.
     public func applyUpdate(force: Bool) async -> UpdateApplyResponse {
+        guard await UpdateGate.shared.enter() else {
+            return UpdateApplyResponse(applying: false, message: "an update is already being applied")
+        }
+        let response = await apply(force: force)
+        await UpdateGate.shared.leave()
+        return response
+    }
+
+    private func apply(force: Bool) async -> UpdateApplyResponse {
         if force {
             _ = await agent?.cancelPendingUpdate()
         } else if let pending = await agent?.pendingUpdateVersion {
@@ -135,4 +144,25 @@ extension ControlPlane {
                 + "\(running) running job(s) finish",
             waitingOnJobs: running)
     }
+}
+
+/// Lets one update request apply at a time.
+///
+/// Two overlapping installs both swapped the binary on the node, and the
+/// loser's rollback put the old version back under the winner's restart.
+actor UpdateGate {
+    static let shared = UpdateGate()
+    private var busy = false
+
+    /// Claims the gate.
+    ///
+    /// - Returns: Whether it was free.
+    func enter() -> Bool {
+        guard !busy else { return false }
+        busy = true
+        return true
+    }
+
+    /// Releases the gate.
+    func leave() { busy = false }
 }
