@@ -160,6 +160,13 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
     /// answerable from history rather than guessed. The samples behind it are a
     /// window held in memory; this is the one number worth outliving the run.
     public var peakMemoryBytes: Int64?
+    /// The GitHub job this node's runner actually picked up, once known.
+    ///
+    /// A JIT runner takes whichever queued job matches its labels, so it can
+    /// differ from `id` — and then `id` is still queued on GitHub.
+    public var assignedJobID: String?
+    /// The workflow run `assignedJobID` belongs to.
+    public var assignedRunID: String?
 
     /// Creates a job record.
     public init(
@@ -177,7 +184,9 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
         exitReason: String? = nil,
         imageRef: String? = nil,
         memoryGB: Int? = nil,
-        peakMemoryBytes: Int64? = nil
+        peakMemoryBytes: Int64? = nil,
+        assignedJobID: String? = nil,
+        assignedRunID: String? = nil
     ) {
         self.id = id
         self.nodeID = nodeID
@@ -194,6 +203,8 @@ public struct Job: Codable, Sendable, Identifiable, Hashable {
         self.imageRef = imageRef
         self.memoryGB = memoryGB
         self.peakMemoryBytes = peakMemoryBytes
+        self.assignedJobID = assignedJobID
+        self.assignedRunID = assignedRunID
     }
 
     /// How long the job has been running, or how long it ran.

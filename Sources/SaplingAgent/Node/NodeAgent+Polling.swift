@@ -34,12 +34,14 @@ extension NodeAgent {
         // waiting — just don't dispatch any of it.
         var stillQueued: [String: Set<String>] = [:]
         var refusedRuns: [String: String] = [:]
+        var assigned: [String: WorkflowJob] = [:]
         var discoveryError: (any Error)?
         for repo in await watchedRepos() {
             do {
                 let found = try await discoverQueuedJobs(in: repo)
                 stillQueued[repo] = found.queued
                 refusedRuns.merge(found.refusedRuns) { existing, _ in existing }
+                assigned.merge(found.assigned) { existing, _ in existing }
             } catch {
                 // One unreachable repo shouldn't stop us polling the others,
                 // and a repo that didn't answer is simply left out of
@@ -48,6 +50,7 @@ extension NodeAgent {
             }
         }
         await noteRefusedRuns(refusedRuns)
+        await recordAssignments(assigned)
 
         // Runs even when discovery partly failed: a job GitHub cancelled is
         // holding a VM right now, and a flaky poll is no reason to leave it
@@ -66,6 +69,8 @@ extension NodeAgent {
         /// Runs refused on provenance, keyed `repo#runID` so a run is only
         /// ever spoken about once, with the sentence to log for it.
         let refusedRuns: [String: String]
+        /// In-progress jobs, keyed by runner name.
+        let assigned: [String: WorkflowJob]
     }
 
     /// Record everything GitHub reports queued for one repo.
@@ -136,7 +141,7 @@ extension NodeAgent {
                 break
             }
         }
-        return RepoPoll(queued: seen, refusedRuns: refused)
+        return RepoPoll(queued: seen, refusedRuns: refused, assigned: work.assigned)
     }
 
     /// Says once, per run, that a run was refused on where its code came from.

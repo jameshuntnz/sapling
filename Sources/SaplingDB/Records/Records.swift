@@ -62,6 +62,8 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
     var imageRef: String?
     var memoryGB: Int?
     var peakMemoryBytes: Int64?
+    var assignedJobId: String?
+    var assignedRunId: String?
     var updatedAt: Date
     /// How many times this node has started the job, counting from one.
     ///
@@ -76,6 +78,8 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
         case imageRef = "image_ref"
         case memoryGB = "memory_gb"
         case peakMemoryBytes = "peak_memory_bytes"
+        case assignedJobId = "assigned_job_id"
+        case assignedRunId = "assigned_run_id"
         case nodeId = "node_id"
         case workflowRunId = "workflow_run_id"
         case queuedAt = "queued_at"
@@ -101,6 +105,8 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
         imageRef = job.imageRef
         memoryGB = job.memoryGB
         peakMemoryBytes = job.peakMemoryBytes
+        assignedJobId = job.assignedJobID
+        assignedRunId = job.assignedRunID
         self.updatedAt = updatedAt
         self.attempts = attempts
     }
@@ -121,7 +127,9 @@ struct JobRecord: Codable, FetchableRecord, PersistableRecord {
             exitReason: exitReason,
             imageRef: imageRef,
             memoryGB: memoryGB,
-            peakMemoryBytes: peakMemoryBytes
+            peakMemoryBytes: peakMemoryBytes,
+            assignedJobID: assignedJobId,
+            assignedRunID: assignedRunId
         )
     }
 
