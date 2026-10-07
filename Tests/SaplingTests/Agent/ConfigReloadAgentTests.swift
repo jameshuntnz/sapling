@@ -143,6 +143,34 @@ struct ConfigReloadAgentTests {
             #expect(await agent.reposRefreshedAt == nil)
         }
     }
+
+    /// Sizes are recorded at discovery; a job still queued when `memory_gb`
+    /// changes would otherwise wait for the old size.
+    @Test("re-sizes queued jobs to the reloaded memory_gb, leaving labels and running jobs")
+    func resizesQueuedJobs() async throws {
+        let sized = Self.base.replacingOccurrences(
+            of: "max_concurrent = 2", with: "max_concurrent = 2\nmemory_gb = 6")
+        try await withAgent(sized) { agent, url in
+            func job(_ id: String, _ labels: [String], _ status: JobStatus) -> Job {
+                var job = Job(id: id, repo: "acme/widgets", platform: .linux, labels: labels, status: status)
+                job.memoryGB = 6
+                return job
+            }
+            try await agent.store.saveJob(job("default", ["linux"], .queued))
+            try await agent.store.saveJob(job("labelled", ["linux", "mem:6"], .queued))
+            try await agent.store.saveJob(job("running", ["linux"], .running))
+
+            try sized.replacingOccurrences(of: "memory_gb = 6", with: "memory_gb = 3")
+                .write(to: url, atomically: true, encoding: .utf8)
+            _ = await agent.reloadConfig()
+
+            let sizes = Dictionary(
+                uniqueKeysWithValues: try await agent.store.jobs().map { ($0.id, $0.memoryGB) })
+            #expect(sizes["default"] == 3)
+            #expect(sizes["labelled"] == 6)
+            #expect(sizes["running"] == 6)
+        }
+    }
 }
 
 extension NodeAgent {

@@ -86,6 +86,8 @@ struct ControlPlane: Sendable {
             nodeCapacity: nodeCapacity,
             memoryBudgetGB: live.node.memoryBudgetGB(totalGB: totalGB),
             committedMemoryGB: committedGB,
+            overheadGB: Dictionary(
+                uniqueKeysWithValues: live.node.overheadByPlatform.map { ($0.key.rawValue, $0.value) }),
             queuedJobs: try await store.countJobs(status: .queued),
             runningJobs: (inUse[.macos] ?? 0) + (inUse[.linux] ?? 0),
             completedLast24h: try await store.countJobs(status: .completed, since: dayAgo),
