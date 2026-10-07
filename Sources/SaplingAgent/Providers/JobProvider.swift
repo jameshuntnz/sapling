@@ -30,6 +30,12 @@ struct JobRunRequest: Sendable {
     /// has to be built with it. A provider consulting config instead could hand
     /// the job a different size than the one the budget reserved.
     let memoryGB: Int?
+    /// Host directory to mount as the job's build cache, or nil for none.
+    ///
+    /// Prepared by the agent rather than the provider, because what happens to
+    /// it afterwards depends on how GitHub says the job ended — see
+    /// `BuildCachePolicy`.
+    let buildCacheDirectory: URL?
 
     init(
         jobID: String,
@@ -42,7 +48,8 @@ struct JobRunRequest: Sendable {
         cache: CacheConfig? = nil,
         bootTimeout: Duration = .seconds(300),
         jobTimeout: Duration = .seconds(7200),
-        memoryGB: Int? = nil
+        memoryGB: Int? = nil,
+        buildCacheDirectory: URL? = nil
     ) {
         self.jobID = jobID
         self.repo = repo
@@ -55,6 +62,7 @@ struct JobRunRequest: Sendable {
         self.bootTimeout = bootTimeout
         self.jobTimeout = jobTimeout
         self.memoryGB = memoryGB
+        self.buildCacheDirectory = buildCacheDirectory
     }
 }
 

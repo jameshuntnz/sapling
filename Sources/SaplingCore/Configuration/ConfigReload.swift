@@ -79,6 +79,8 @@ public enum ConfigReload {
         "linux.max_memory_gb",
         "linux.job_timeout_seconds",
         "linux.default_image",
+        "build_cache.enabled",
+        "build_cache.max_size_gb",
         "update.repository",
         "update.channel",
         "update.check_interval_hours",
@@ -87,15 +89,16 @@ public enum ConfigReload {
 
     /// Fields a client may change through `PUT /api/v1/config`.
     ///
-    /// The reloadable set, less the two that decide what the node trusts. The
+    /// The reloadable set, less the ones that decide what the node trusts. The
     /// API has no auth — tailnet membership is the access control (§8) — so
     /// anything on the tailnet could otherwise point `update.repository` at
-    /// releases of its choosing and then ask the node to install one, or open
-    /// the node to public repositories' forks. Those stay a file edit on the
-    /// node itself.
+    /// releases of its choosing and then ask the node to install one, open
+    /// the node to public repositories' forks, or start sharing build output
+    /// between jobs. Those stay a file edit on the node itself.
     public static let apiEditableKeys: Set<String> = reloadableKeys.subtracting([
         "update.repository",
         "github.allow_public_repos",
+        "build_cache.enabled",
     ])
 
     /// Fields that are never rendered, whatever they contain.
@@ -108,7 +111,9 @@ public enum ConfigReload {
 
     /// The order sections are shown in: identity, then how work arrives, then
     /// what runs it.
-    static let sectionOrder = ["node", "server", "github", "macos", "linux", "network", "cache", "update"]
+    static let sectionOrder = [
+        "node", "server", "github", "macos", "linux", "network", "cache", "build_cache", "update",
+    ]
 
     /// Shown for a field the config file leaves out.
     static let unset = "(unset)"
@@ -258,6 +263,8 @@ public enum ConfigReload {
         merged.linux.maxMemoryGB = incoming.linux.maxMemoryGB
         merged.linux.jobTimeoutSeconds = incoming.linux.jobTimeoutSeconds
         merged.linux.defaultImage = incoming.linux.defaultImage
+
+        merged.buildCache = incoming.buildCache
 
         merged.update = incoming.update
 

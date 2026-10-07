@@ -25,7 +25,7 @@ Each of these cost a debugging cycle on real hardware. The unit suite was green 
 - **The network watchdog runs for the whole job, not just at the start.** Apple's `container` network can die with containers still attached, and nothing in `container list`, `container system status` or `tart ip` reports it — they keep printing addresses on a subnet the host has no interface for. The one-shot egress probe passed on every environment that then failed this way. See [docs/NETWORKING.md](docs/NETWORKING.md).
 - **Orphan reaping protects the base image by name and prefix.** `sapling-` matched `sapling-macos-base`, and the daemon deleted its own 80GB image on every start.
 - **GitHub decides job outcomes, not the runner's exit code.** A deprecated runner exits 0 having done nothing; trusting that reported a green build that never ran.
-- **No build cache.** Measured: restoring 919MB costs ~130s and saving it ~185s, against a ~140s build. See [docs/AUTOMATION-GAPS.md](docs/AUTOMATION-GAPS.md) for the version that would help.
+- **The build cache is on the host, not GitHub's.** Measured: restoring 919MB from GitHub cost ~130s and saving it ~185s, against a ~140s build. `[build_cache]` mounts a host directory instead. Only the default branch writes it — a release builds from it, and the node installs its own releases. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#build-cache).
 
 ## Layout
 

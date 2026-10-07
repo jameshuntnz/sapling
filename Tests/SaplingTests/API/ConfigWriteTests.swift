@@ -65,7 +65,10 @@ struct ConfigWriteTests {
     @Test("trust settings and credentials are not editable over the API")
     func refusesProtectedKeys() async throws {
         try await withControlPlane { controlPlane, url in
-            for key in ["update.repository", "github.allow_public_repos", "github.token", "server.port"] {
+            for key in [
+                "update.repository", "github.allow_public_repos", "build_cache.enabled", "github.token",
+                "server.port",
+            ] {
                 let result = await controlPlane.updateConfig(.init(values: [key: "x"]))
                 #expect(result.error?.contains("not editable") == true, "\(key) must be refused")
             }

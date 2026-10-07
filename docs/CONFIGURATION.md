@@ -53,6 +53,10 @@ enabled = true
 port = 8735
 proxies = ["go", "cargo"]
 
+[build_cache]
+enabled = false          # macOS jobs get $SAPLING_BUILD_CACHE; see below
+max_size_gb = 20
+
 [update]
 repository = "jameshuntnz/sapling"
 channel = "stable"       # stable | rc | dev
@@ -98,6 +102,50 @@ copy, so an edit that fails to parse is never written back.
 There is no `config set`. The file is hand-written TOML whose comments explain
 why a node is tuned the way it is, and writing it back from a decoded struct
 would throw all of that away.
+
+## Build cache
+
+Every job starts in a fresh VM, so every build starts cold. With
+`[build_cache] enabled = true`, each macOS job gets a directory on the host
+mounted into its VM, and finds it in `$SAPLING_BUILD_CACHE`. What goes in it
+is up to the workflow:
+
+```yaml
+- name: Restore build cache
+  if: env.SAPLING_BUILD_CACHE != ''
+  run: '[ -d "$SAPLING_BUILD_CACHE/.build" ] && cp -R "$SAPLING_BUILD_CACHE/.build" . || true'
+
+# ... build and test ...
+
+- name: Save build cache
+  if: success() && env.SAPLING_BUILD_CACHE != ''
+  run: rsync -a --delete .build/ "$SAPLING_BUILD_CACHE/.build/"
+```
+
+Measured with this repository's own CI on the node: a cold `swift build
+--build-tests` took 156s, and 75s over a restored `.build`. It does not get
+further than that by copying, because SwiftPM's build database records each
+output's inode and a copy has new ones; it rebuilds what it can no longer vouch
+for. Xcode's compilation cache (`COMPILATION_CACHE_ENABLE_CACHING`) is keyed by
+content instead, and is the better thing to put here for an Xcode build.
+
+How it is kept:
+
+- **One directory per repository and job name.** Two jobs in a repository
+  usually build different things, so they don't share.
+- **Each job gets its own copy-on-write clone**, so jobs running at the same
+  time never see each other's writes, and a job that dies half way leaves the
+  cache as it was.
+- **Only the default branch writes it.** A job's clone replaces the cache only
+  if GitHub says it succeeded on the default branch, on the runner Sapling
+  started for it. Any other job — a pull request's included — starts from the
+  default branch's cache and throws its own changes away. See
+  [SECURITY.md](../SECURITY.md) for why.
+- **Least recently used goes first** once the whole cache passes
+  `max_size_gb`.
+
+The directory is `~/.sapling/build-cache`. Deleting it is always safe; the next
+job is simply cold.
 
 ## Which repositories a node watches
 

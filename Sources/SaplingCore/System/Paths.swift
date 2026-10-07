@@ -24,6 +24,11 @@ public enum SaplingPaths {
     public static var stateDirectory: URL { home.appendingPathComponent("state") }
     /// Backing store for the pull-through package caches.
     public static var runnerCacheDirectory: URL { home.appendingPathComponent("runner-cache") }
+    /// Build output kept between jobs, one directory per repository and job.
+    ///
+    /// Not created with the rest of the tree: it has to be owned by the console
+    /// user, whose `tart` mounts it into each VM — see `BuildCache`.
+    public static var buildCacheDirectory: URL { home.appendingPathComponent("build-cache") }
     /// Private key the agent uses to reach macOS VMs.
     public static var sshKeyFile: URL { home.appendingPathComponent("vm_ed25519") }
     /// Where the daemon records the address it actually bound.

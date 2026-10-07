@@ -88,4 +88,13 @@ extension GitHubClient {
     func job(repo: String, jobID: Int64) async throws -> WorkflowJob {
         try await request("GET", "/repos/\(repo)/actions/jobs/\(jobID)", as: WorkflowJob.self)
     }
+
+    /// The repository's default branch, or `nil` if GitHub does not say.
+    ///
+    /// Asked once per promotion rather than cached: it is one request against
+    /// a job measured in minutes, and a renamed default branch should not keep
+    /// the old name trusted until the daemon restarts.
+    func defaultBranch(repo: String) async throws -> String? {
+        try await request("GET", "/repos/\(repo)", as: RepositoryResponse.self).defaultBranch
+    }
 }

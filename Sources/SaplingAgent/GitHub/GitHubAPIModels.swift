@@ -10,6 +10,11 @@ struct WorkflowJob: Decodable, Sendable {
     /// Commit the job will check out — and the commit its image is built from,
     /// so an image can never drift from the code that needs it.
     let headSha: String?
+    /// Branch the job's run was triggered on.
+    ///
+    /// A pull request's own branch, not its base. Whether a job may update the
+    /// build cache turns on this.
+    let headBranch: String?
     let startedAt: Date?
     let completedAt: Date?
     let runnerName: String?
@@ -120,6 +125,7 @@ struct GitBlobResponse: Decodable, Sendable {
 struct RepositoryResponse: Decodable {
     let visibility: String?
     let `private`: Bool
+    let defaultBranch: String?
 }
 
 /// Thin async wrapper over the subset of the GitHub REST API Sapling needs.

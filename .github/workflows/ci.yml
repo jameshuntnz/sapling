@@ -48,8 +48,24 @@ jobs:
       - name: Version derivation
         run: ./scripts/test-next-version.sh
 
+      # The node's build cache, when it has one turned on (see
+      # docs/CONFIGURATION.md#build-cache). Skipped everywhere else, and only a
+      # green run on main is kept for the next one.
+      - name: Restore build cache
+        if: env.SAPLING_BUILD_CACHE != ''
+        run: |
+          if [ -d "$SAPLING_BUILD_CACHE/.build" ]; then
+            time cp -R "$SAPLING_BUILD_CACHE/.build" .
+          else
+            echo "build cache is empty; this build is cold"
+          fi
+
       - name: Build
         run: swift build --build-tests
 
       - name: Test
         run: swift test
+
+      - name: Save build cache
+        if: success() && env.SAPLING_BUILD_CACHE != ''
+        run: time rsync -a --delete .build/ "$SAPLING_BUILD_CACHE/.build/"
