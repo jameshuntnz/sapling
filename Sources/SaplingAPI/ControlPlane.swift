@@ -64,7 +64,7 @@ struct ControlPlane: Sendable {
             live.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
         let committedGB =
             (try? await store.committedMemoryGB(
-                fallbackGB: fallbackGB, overheadGB: live.node.environmentOverheadGB)) ?? 0
+                fallbackGB: fallbackGB, overheadGB: live.node.overheadByPlatform)) ?? 0
 
         let dayAgo = Date().addingTimeInterval(-86400)
         let lastPollRaw = try await store.state(SaplingStore.StateKey.lastPollAt)

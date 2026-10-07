@@ -67,6 +67,7 @@ public enum ConfigReload {
         "node.memory_reserve_gb",
         "node.memory_budget_gb",
         "node.environment_overhead_gb",
+        "node.container_overhead_gb",
         "node.serialize_platforms",
         "macos.max_concurrent",
         "macos.labels",
@@ -249,6 +250,7 @@ public enum ConfigReload {
         merged.node.memoryReserveGB = incoming.node.memoryReserveGB
         merged.node.memoryBudgetOverrideGB = incoming.node.memoryBudgetOverrideGB
         merged.node.environmentOverheadGB = incoming.node.environmentOverheadGB
+        merged.node.containerOverheadGB = incoming.node.containerOverheadGB
         merged.node.serializePlatforms = incoming.node.serializePlatforms
 
         merged.macos.maxConcurrent = incoming.macos.maxConcurrent

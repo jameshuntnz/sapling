@@ -144,21 +144,27 @@ extension SaplingStore {
     ///
     /// - Parameters:
     ///   - fallbackGB: Charged for jobs recorded before sizes existed.
-    ///   - overheadGB: Charged on top of every job, for what its environment
-    ///     costs the host beyond the guest. See `NodeConfig.environmentOverheadGB`.
+    ///   - overheadGB: Charged on top of every job of each platform, for what
+    ///     its environment costs the host beyond the guest. A platform missing
+    ///     from it is charged the largest given. See `NodeConfig.overheadGB(for:)`.
     /// - Returns: Total GB reserved across both platforms.
     /// - Throws: If the database cannot be read.
-    public func committedMemoryGB(fallbackGB: Int, overheadGB: Int) async throws -> Int {
+    public func committedMemoryGB(
+        fallbackGB: Int, overheadGB: [JobPlatform: Int]
+    ) async throws -> Int {
+        let largestOverheadGB = overheadGB.values.max() ?? 0
         let active = JobStatus.allCases.filter(\.occupiesSlot).map(\.rawValue)
         return try await writer.read { db in
             let placeholders = active.map { _ in "?" }.joined(separator: ",")
             let rows = try Row.fetchAll(
                 db,
-                sql: "SELECT memory_gb FROM jobs WHERE status IN (\(placeholders))",
+                sql: "SELECT platform, memory_gb FROM jobs WHERE status IN (\(placeholders))",
                 arguments: StatementArguments(active)
             )
             return rows.reduce(0) { total, row in
-                total + ((row["memory_gb"] as Int?) ?? fallbackGB) + overheadGB
+                let platform = (row["platform"] as String?).flatMap(JobPlatform.init(rawValue:))
+                let overhead = platform.flatMap { overheadGB[$0] } ?? largestOverheadGB
+                return total + ((row["memory_gb"] as Int?) ?? fallbackGB) + overhead
             }
         }
     }

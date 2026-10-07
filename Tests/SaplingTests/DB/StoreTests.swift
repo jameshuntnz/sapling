@@ -68,6 +68,28 @@ struct StoreTests {
         #expect(slots[.linux] == 1)
     }
 
+    /// A VM and a container cost the host very different amounts beyond their
+    /// guests, so each running job is charged its own platform's overhead.
+    @Test("charges each running job its own platform's overhead")
+    func committedMemoryPerPlatform() async throws {
+        let store = try makeStore()
+        try await store.upsertNode(
+            Node(id: "mini", name: "mini", platform: "darwin/arm64", lastSeenAt: Date(), status: .online))
+
+        var vm = makeJob("1", platform: .macos, status: .running)
+        vm.memoryGB = 5
+        var container = makeJob("2", platform: .linux, status: .running)
+        container.memoryGB = 6
+        try await store.saveJob(vm)
+        try await store.saveJob(container)
+        try await store.saveJob(makeJob("3", platform: .linux, status: .queued))
+
+        let overhead: [JobPlatform: Int] = [.macos: 2, .linux: 1]
+        #expect(try await store.committedMemoryGB(fallbackGB: 8, overheadGB: overhead) == 14)
+        // A platform the caller left out is charged the largest overhead given.
+        #expect(try await store.committedMemoryGB(fallbackGB: 8, overheadGB: [.macos: 2]) == 15)
+    }
+
     /// After an unclean shutdown the VMs are gone but the rows still say
     /// "running", and would hold slots forever.
     @Test("fails jobs stranded by a crash")

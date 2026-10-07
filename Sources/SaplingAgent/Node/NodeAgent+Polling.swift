@@ -96,7 +96,7 @@ extension NodeAgent {
             if let reason = JobSizing.unschedulableReason(
                 memoryGB: sized,
                 budgetGB: memoryBudgetGB,
-                overheadGB: config.node.environmentOverheadGB,
+                overheadGB: config.node.overheadGB(for: platform),
                 ceilingGB: platform == .macos ? config.macos.maxMemoryGB : config.linux.maxMemoryGB)
             {
                 await refuse(job: job, repo: repo, platform: platform, reason: reason)
