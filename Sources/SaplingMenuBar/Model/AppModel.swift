@@ -67,6 +67,9 @@ final class AppModel {
     var isMenuOpen = false {
         didSet {
             if !isMenuOpen { lastActionMessage = nil }
+            // Opening the menu re-asks, so a release published since the last
+            // "up to date" shows without waiting out the interval.
+            if isMenuOpen, case .none = updateState { updateCheckedAt = nil }
             restart()
         }
     }
