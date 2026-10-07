@@ -12,49 +12,6 @@ enum DiskThreshold {
     }
 }
 
-/// The disk line under Capacity, opening the breakdown.
-struct DiskSummaryRow: View {
-    let total: Int64
-    let free: Int64
-    let onOpen: () -> Void
-
-    private var low: Bool { DiskThreshold.isLow(free: free, total: total) }
-    private var usedFraction: Double { total > 0 ? Double(total - free) / Double(total) : 0 }
-
-    var body: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("Disk")
-                        .font(.system(.caption, design: .rounded).weight(.medium))
-                        .frame(width: 52, alignment: .leading)
-                        .foregroundStyle(.primary)
-                    Text("\(Format.bytes(free)) free of \(Format.bytes(total))")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(low ? .orange : .secondary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(Color.secondary.opacity(0.15))
-                        Rectangle()
-                            .fill(low ? Color.orange : Color.secondary.opacity(0.55))
-                            .frame(width: geometry.size.width * usedFraction)
-                    }
-                    .clipShape(Capsule())
-                }
-                .frame(height: 6)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("What is using the node's disk, and what can be cleared")
-    }
-}
-
 /// What is using the node's disk, with the cleanups a person can choose.
 struct DiskView: View {
     @Environment(AppModel.self) private var model
@@ -184,6 +141,7 @@ struct DiskView: View {
         case .deleteVM: "Delete VM"
         case .pruneImages: "Remove unused images"
         case .trimLogs: "Trim old logs"
+        case .resetBuilder: "Reset builder"
         case nil: ""
         }
     }

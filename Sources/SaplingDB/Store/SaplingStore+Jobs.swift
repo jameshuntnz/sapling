@@ -139,14 +139,15 @@ extension SaplingStore {
         }
     }
 
-    /// Image refs used by jobs updated since a cutoff.
+    /// Image refs used by jobs updated since a cutoff, most recent job first.
     ///
-    /// Drives image retention: anything not in this set is a build nothing has
+    /// Drives image retention: anything not in this list is a build nothing has
     /// needed lately.
     public func recentJobImageRefs(since cutoff: Date) async throws -> [String] {
         try await writer.read { db in
             try JobRecord
                 .filter(Column("updated_at") >= cutoff)
+                .order(Column("updated_at").desc)
                 .fetchAll(db)
                 .compactMap(\.imageRef)
         }

@@ -10,6 +10,8 @@ import SwiftUI
 struct MetricsView: View {
     let metrics: NodeMetrics
     let history: [NodeMetrics]
+    /// Opens the disk breakdown.
+    let onOpenDisk: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -30,14 +32,21 @@ struct MetricsView: View {
                 tint: metrics.isUnderMemoryPressure ? .orange : .accentColor,
                 warning: metrics.isUnderMemoryPressure ? swapDetail : nil)
 
-            Meter(
-                label: "Disk",
-                value: metrics.diskUsage,
-                detail: diskDetail,
-                samples: history.map(\.diskUsage),
-                tint: metrics.diskFree < 15 * 1_073_741_824 ? .orange : .accentColor,
-                warning: metrics.diskFree < 15 * 1_073_741_824
-                    ? "not enough room for a job to finish" : nil)
+            Button(action: onOpenDisk) {
+                Meter(
+                    label: "Disk",
+                    value: metrics.diskUsage,
+                    detail: diskDetail,
+                    samples: history.map(\.diskUsage),
+                    tint: metrics.diskFree < 15 * 1_073_741_824 ? .orange : .accentColor,
+                    warning: metrics.diskFree < 15 * 1_073_741_824
+                        ? "not enough room for a job to finish" : nil,
+                    showsDisclosure: true
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("What is using the node's disk, and what can be cleared")
         }
     }
 
@@ -73,13 +82,21 @@ struct Meter: View {
     var samples: [Double] = []
     var tint: Color = .accentColor
     var warning: String?
+    var showsDisclosure = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(label)
-                    .font(.system(.caption, design: .rounded).weight(.medium))
-                    .frame(width: 52, alignment: .leading)
+                HStack(spacing: 2) {
+                    Text(label)
+                        .font(.system(.caption, design: .rounded).weight(.medium))
+                    if showsDisclosure {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(width: 52, alignment: .leading)
 
                 Text(detail)
                     .font(.caption2.monospacedDigit())

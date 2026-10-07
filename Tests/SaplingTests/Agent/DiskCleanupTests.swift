@@ -23,4 +23,14 @@ struct DiskCleanupTests {
             #expect(result.error != nil, "\(target) must be refused")
         }
     }
+
+    @Test("refuses to reset the image builder while a Linux job is running")
+    func refusesBuilderResetDuringLinuxJob() async throws {
+        let store = try SaplingStore(inMemoryNamed: UUID().uuidString)
+        try await store.saveJob(
+            Job(id: "1", repo: "acme/widgets", platform: .linux, labels: [], status: .running))
+        let agent = NodeAgent(config: SaplingConfig(), store: store)
+        let result = await agent.cleanDisk(.init(action: .resetBuilder))
+        #expect(result.error?.contains("Linux job") == true)
+    }
 }
