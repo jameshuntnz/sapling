@@ -25,6 +25,7 @@ struct ConfigReloadTests {
         config.node.maxConcurrent = 3
         config.node.memoryReserveGB = 8
         config.node.memoryBudgetOverrideGB = 48
+        config.node.environmentOverheadGB = 3
         config.node.serializePlatforms = true
 
         config.macos.maxConcurrent = 1

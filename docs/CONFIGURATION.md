@@ -8,6 +8,8 @@ actually want to change.
 ```toml
 [node]
 name = "mac-mini-01"
+memory_reserve_gb = 2         # kept for the host; the rest is the job budget
+environment_overhead_gb = 2   # charged per VM/container on top of its size
 
 [server]
 bind = "tailscale"   # or "loopback", or an explicit address
