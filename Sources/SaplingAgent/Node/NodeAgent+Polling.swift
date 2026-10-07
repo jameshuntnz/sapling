@@ -230,6 +230,12 @@ extension NodeAgent {
     }
 
     func dispatch(_ job: Job, memoryGB: Int) async {
+        // Checked before the first await, and counted until the job is in
+        // `runningJobs`, so a restart can never land between claim and track.
+        guard !dispatchHeld else { return }
+        dispatchesInFlight += 1
+        defer { dispatchesInFlight -= 1 }
+
         // Claim the slot in the database before anything can await, so the
         // next poll cycle can't see this job as still queued.
         do {

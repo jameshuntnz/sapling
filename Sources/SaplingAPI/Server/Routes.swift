@@ -165,15 +165,18 @@ func registerRoutes(_ app: Application, controlPlane: ControlPlane, advertisedUR
     }
 
     v1.post("update") { request async throws -> Response in
-        // Updating restarts the daemon, which fails every running job, so it
-        // has to be asked for explicitly while the node is busy.
+        // A busy node waits for its jobs; force installs now and fails them.
         let force = (try? request.query.get(Bool.self, at: "force")) ?? false
         return try jsonResponse(await controlPlane.applyUpdate(force: force))
     }
 
+    v1.delete("update") { _ async throws -> Response in
+        try jsonResponse(await controlPlane.cancelUpdate())
+    }
+
     v1.post("restart") { request async throws -> Response in
         // Restarting fails every running job, so it has to be asked for
-        // explicitly while the node is busy — same rule as an update.
+        // explicitly while the node is busy.
         let force = (try? request.query.get(Bool.self, at: "force")) ?? false
         return try jsonResponse(await controlPlane.restartDaemon(force: force))
     }

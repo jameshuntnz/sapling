@@ -99,7 +99,8 @@ struct ControlPlane: Sendable {
             metrics: await agent?.metrics.current(),
             awaitingAssignment: await agent?.awaitingAssignment(),
             diskTotalBytes: disk?.total,
-            diskFreeBytes: disk?.free
+            diskFreeBytes: disk?.free,
+            pendingUpdate: await agent?.pendingUpdateVersion
         )
     }
 
@@ -197,72 +198,6 @@ struct ControlPlane: Sendable {
             intervalSeconds: Int(MetricsCollector.interval.components.seconds))
     }
 
-    // MARK: - Updates
-
-    /// Look for a newer version on the configured channel.
-    ///
-    /// A failed check is reported in the response rather than thrown: not
-    /// being able to reach GitHub is worth showing, not worth a 500.
-    ///
-    /// - Returns: What is available, and what is running now.
-    public func checkForUpdate() async -> UpdateCheckResponse {
-        let live = await effectiveConfig()
-        do {
-            let update = try await SelfUpdater(config: live).check()
-            return UpdateCheckResponse(
-                current: SaplingVersion.current,
-                channel: live.update.channel,
-                available: update?.version,
-                tag: update?.tag,
-                publishedAt: update?.publishedAt)
-        } catch {
-            return UpdateCheckResponse(
-                current: SaplingVersion.current,
-                channel: live.update.channel,
-                error: error.localizedDescription)
-        }
-    }
-
-    /// Install the newest version on the configured channel.
-    ///
-    /// The daemon restarts into the new binary, so this replies before
-    /// restarting and the connection then drops — which is success, not a
-    /// failure, and the caller should treat it as such.
-    ///
-    /// - Parameter force: Update even while jobs are running.
-    /// - Returns: What is being applied, or why nothing is.
-    public func applyUpdate(force: Bool) async -> UpdateApplyResponse {
-        let live = await effectiveConfig()
-        let updater = SelfUpdater(config: live)
-        let update: AvailableUpdate?
-        do {
-            // With force, take the newest release on the channel whether or not
-            // it outranks what is running. Without it, only a genuine upgrade.
-            update = force ? try await updater.newestRelease() : try await updater.check()
-        } catch {
-            return UpdateApplyResponse(
-                applying: false, message: "could not check for updates: \(error.localizedDescription)")
-        }
-        guard let update else {
-            return UpdateApplyResponse(
-                applying: false,
-                message: "already on \(SaplingVersion.current), the newest on the "
-                    + "\(live.update.channel.rawValue) channel")
-        }
-
-        let running = await agent?.activeJobCount() ?? 0
-        do {
-            // Verified and installed before replying, so a failure is reported
-            // rather than silently swallowed by the restart.
-            try await updater.apply(update, runningJobs: running, force: force)
-            return UpdateApplyResponse(
-                applying: true, version: update.version,
-                message: "installed \(update.version); the daemon is restarting")
-        } catch {
-            return UpdateApplyResponse(applying: false, message: error.localizedDescription)
-        }
-    }
-
     // MARK: - Control
 
     func drain() async throws -> ControlResponse {
@@ -282,8 +217,13 @@ struct ControlPlane: Sendable {
     }
 
     func uncordon() async throws -> ControlResponse {
+        // Accepting jobs again would keep a pending update waiting indefinitely.
+        let calledOff = await agent?.cancelPendingUpdate()
         try await setStatus(.online)
-        return ControlResponse(status: .online, message: "accepting jobs")
+        return ControlResponse(
+            status: .online,
+            message: calledOff.map { "accepting jobs; the update to \($0) is called off" } ?? "accepting jobs"
+        )
     }
 
     private func setStatus(_ status: NodeStatus) async throws {

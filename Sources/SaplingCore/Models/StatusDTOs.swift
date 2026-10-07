@@ -95,6 +95,8 @@ public struct StatusResponse: Codable, Sendable {
     public var diskTotalBytes: Int64?
     /// Free space on it.
     public var diskFreeBytes: Int64?
+    /// A version staged to install once running jobs finish.
+    public var pendingUpdate: String?
 
     /// Creates a status summary.
     public init(
@@ -116,7 +118,8 @@ public struct StatusResponse: Codable, Sendable {
         metrics: NodeMetrics? = nil,
         awaitingAssignment: [String: Date]? = nil,
         diskTotalBytes: Int64? = nil,
-        diskFreeBytes: Int64? = nil
+        diskFreeBytes: Int64? = nil,
+        pendingUpdate: String? = nil
     ) {
         self.version = version
         self.node = node
@@ -137,5 +140,6 @@ public struct StatusResponse: Codable, Sendable {
         self.awaitingAssignment = awaitingAssignment
         self.diskTotalBytes = diskTotalBytes
         self.diskFreeBytes = diskFreeBytes
+        self.pendingUpdate = pendingUpdate
     }
 }

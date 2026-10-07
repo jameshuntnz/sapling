@@ -183,14 +183,23 @@ public struct SaplingClient: Sendable {
 
     /// Tells the daemon to install the newest version on its channel.
     ///
-    /// The daemon replies before restarting, so the next request will fail
-    /// briefly while it comes back.
+    /// On an idle node the daemon replies before restarting, so the next
+    /// request will fail briefly while it comes back. A busy node schedules
+    /// the install for when its jobs finish, and says so in `waitingOnJobs`.
     ///
-    /// - Parameter force: Update even while jobs are running.
+    /// - Parameter force: Install now even while jobs are running, failing them.
     /// - Returns: What is being applied, or why nothing is.
     /// - Throws: `ClientError` if the daemon is unreachable.
     public func applyUpdate(force: Bool = false) async throws -> UpdateApplyResponse {
         try await send("POST", "api/v1/update?force=\(force)", as: UpdateApplyResponse.self)
+    }
+
+    /// Calls off an update that is waiting for running jobs to finish.
+    ///
+    /// - Returns: What was called off, if anything.
+    /// - Throws: `ClientError` if the daemon is unreachable.
+    public func cancelUpdate() async throws -> UpdateApplyResponse {
+        try await send("DELETE", "api/v1/update", as: UpdateApplyResponse.self)
     }
 
     /// Fetches the configuration the daemon is running with.

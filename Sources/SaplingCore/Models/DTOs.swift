@@ -133,12 +133,17 @@ public struct UpdateApplyResponse: Codable, Sendable {
     public var version: String?
     /// What happened, phrased for a person.
     public var message: String
+    /// Jobs the install is waiting on, when it was scheduled rather than applied.
+    ///
+    /// Optional so older daemons, which refused instead, still decode.
+    public var waitingOnJobs: Int?
 
     /// Creates an update apply result.
-    public init(applying: Bool, version: String? = nil, message: String) {
+    public init(applying: Bool, version: String? = nil, message: String, waitingOnJobs: Int? = nil) {
         self.applying = applying
         self.version = version
         self.message = message
+        self.waitingOnJobs = waitingOnJobs
     }
 }
 
