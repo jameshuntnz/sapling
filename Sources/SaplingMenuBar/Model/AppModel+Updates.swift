@@ -69,13 +69,18 @@ extension AppModel {
     /// later. That is success. `restartingUntil` is what stops the panel
     /// reporting it as a fault — see `isRestarting`.
     ///
-    /// - Parameter force: Install even while jobs are running, which orphans
-    ///   their VMs. Only ever passed after the daemon has refused once and said
-    ///   so.
+    /// A busy node schedules the install instead; `status.pendingUpdate`
+    /// reports it from then on.
+    ///
+    /// - Parameter force: Install now even while jobs are running, failing
+    ///   them.
     func applyUpdate(force: Bool = false) async {
         do {
             let response = try await client.applyUpdate(force: force)
-            if response.applying {
+            if response.waitingOnJobs != nil {
+                updateState = .none
+                updateCheckedAt = nil
+            } else if response.applying {
                 updateState = .installing(version: response.version ?? "a new version")
                 restartingUntil = Date().addingTimeInterval(Self.restartGrace)
             } else {
@@ -86,6 +91,20 @@ extension AppModel {
         } catch {
             updateState = .refused(error.localizedDescription)
         }
+        await refresh()
+    }
+
+    /// Call off an update waiting for running jobs to finish.
+    func cancelUpdate() async {
+        do {
+            let response = try await client.cancelUpdate()
+            if response.applying { updateState = .refused(response.message) }
+        } catch let error as ClientError {
+            updateState = .refused(error.message)
+        } catch {
+            updateState = .refused(error.localizedDescription)
+        }
+        updateCheckedAt = nil
         await refresh()
     }
 

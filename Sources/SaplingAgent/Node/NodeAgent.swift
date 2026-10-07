@@ -93,6 +93,12 @@ public actor NodeAgent {
     var jobStatsTask: Task<Void, Never>?
     var housekeepingTask: Task<Void, Never>?
     var runningJobs: [String: Task<Void, Never>] = [:]
+    /// Dispatches past the hold check but not yet in `runningJobs`.
+    var dispatchesInFlight = 0
+    /// Set once the node is idle and about to restart; nothing new may start.
+    var dispatchHeld = false
+    /// An update waiting for running jobs to finish.
+    var pendingUpdate: PendingUpdate?
     /// Runner names minted for jobs that are still starting or running.
     ///
     /// Housekeeping sweeps offline runners to clear ones a crashed VM left

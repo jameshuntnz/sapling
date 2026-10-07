@@ -124,7 +124,10 @@ final class AppModel {
             // Reaching the daemon at all means any restart we were excusing is
             // over. If it was an install, confirm what is actually running now
             // rather than leaving the banner asserting it from before.
-            self.restartingUntil = nil
+            // A scheduled update restarts whenever its jobs finish, so keep
+            // excusing a dropped connection while one is pending.
+            self.restartingUntil =
+                status.pendingUpdate == nil ? nil : Date().addingTimeInterval(Self.restartGrace)
             if case .installing = updateState {
                 self.updateState = .none
                 self.updateCheckedAt = nil

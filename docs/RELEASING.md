@@ -153,17 +153,24 @@ node*, not the Mac you typed it on.
 
 What the daemon does, in order:
 
-1. **Refuses if jobs are running** — a restart marks every in-flight job failed
-   and reaps its VM. `--force` overrides.
-2. **Downloads** the archive and `SHA256SUMS` from the release.
-3. **Verifies** the archive against the published checksum. A mismatch stops
+1. **Downloads** the archive and `SHA256SUMS` from the release.
+2. **Verifies** the archive against the published checksum. A mismatch stops
    here.
-4. **Unpacks** and checks there is a runnable binary inside.
+3. **Unpacks** and checks there is a runnable binary inside.
+4. **Waits for running jobs**, if there are any. The node drains, and the
+   install happens the moment the last job finishes; nothing new starts in
+   between. `--force` skips the wait and fails them instead.
 5. **Swaps the binary**, moving the old one to
    `/usr/local/bin/sapling.previous` rather than overwriting it — writing over
    a running executable gives you `Text file busy`. If the copy fails, the old
    binary is moved back, so a failed update leaves a node that still starts.
-6. **Restarts** via `launchctl kickstart`.
+6. **Restarts** via `launchctl kickstart`. Startup registers the node online,
+   so it does not stay drained.
+
+On a busy node the CLI follows the wait, printing the running job count.
+Ctrl-C leaves the update scheduled — the daemon is the one waiting.
+`sapling update --cancel`, or `sapling uncordon`, calls it off and puts the
+node back as it was. `sapling status` and the menu bar show a pending update.
 
 The CLI then waits for the daemon to come back and reports the version it is
 actually running — worth doing rather than assuming, because a failed restart

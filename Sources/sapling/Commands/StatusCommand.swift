@@ -29,6 +29,9 @@ struct Status: AsyncParsableCommand {
             "\(Style.bold(status.node.name))  \(Style.status(status.node.status))  \(Style.dim("sapling \(status.version)"))"
         )
         print("  last seen  \(Format.relative(status.node.lastSeenAt))")
+        if let pending = status.pendingUpdate {
+            print("  updating   \(Style.yellow(pending))\(Style.dim(" once running jobs finish"))")
+        }
         print("")
 
         print(Style.bold("Slots"))

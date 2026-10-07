@@ -243,6 +243,20 @@ sapling drain                     # blocks until running jobs finish
 
 **Expect:** cordoned nodes still *see* queued jobs (so the UI stays useful) but don't dispatch them.
 
+## Phase 8b — Update while busy
+
+```bash
+# start a long job, then, while it runs:
+sapling update                    # verifies, drains, waits on 1 job
+sapling status                    # draining; the job still running
+# trigger a second job — it should stay queued
+```
+
+**Expect:** the running job finishes green, the daemon restarts into the new
+version within seconds of it, the node comes back **online**, and the queued
+job starts. Then repeat and run `sapling update --cancel` mid-wait: the node
+returns to online and the job is untouched.
+
 ## Phase 9 — Config reload
 
 The one that has to be checked with a job running, because that is the whole

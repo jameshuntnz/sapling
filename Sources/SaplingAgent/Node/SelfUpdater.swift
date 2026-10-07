@@ -32,19 +32,17 @@ public struct SelfUpdater: Sendable {
     /// Why an update could not be applied.
     public enum UpdateError: Error, LocalizedError, Sendable {
         case notRoot
-        case busy(Int)
         case checksumMismatch(expected: String, actual: String)
         case checksumMissing(String)
         case unpackFailed(String)
         case notAnExecutable
+        case restartFailed(String)
 
         /// A message naming what went wrong and, where there is one, the fix.
         public var errorDescription: String? {
             switch self {
             case .notRoot:
                 "updating needs root; the daemon has it, a CLI run by hand does not"
-            case .busy(let count):
-                "\(count) job(s) are running — updating now would orphan their VMs"
             case .checksumMismatch(let expected, let actual):
                 "checksum mismatch: expected \(expected), got \(actual)"
             case .checksumMissing(let name):
@@ -53,6 +51,8 @@ public struct SelfUpdater: Sendable {
                 "could not unpack the release: \(detail)"
             case .notAnExecutable:
                 "the downloaded archive contains no runnable sapling binary"
+            case .restartFailed(let detail):
+                "installed, but the restart failed (\(detail)); the next restart runs it"
             }
         }
     }
@@ -75,37 +75,53 @@ public struct SelfUpdater: Sendable {
         try await client.latestUpdate(newerThan: nil)
     }
 
-    /// Download, verify, install, and restart into a new version.
+    /// Download, verify and unpack a release, ready to install.
+    ///
+    /// Separate from installing so a busy node can fetch and check the
+    /// release now, while someone is watching, and install it once its jobs
+    /// have finished.
+    ///
+    /// - Parameter update: The version to fetch.
+    /// - Returns: The unpacked release.
+    /// - Throws: `UpdateError` if the release cannot be verified or unpacked.
+    public func stage(_ update: AvailableUpdate) async throws -> StagedRelease {
+        guard getuid() == 0 else { throw UpdateError.notRoot }
+
+        Log.info("downloading \(update.version)")
+        let (archive, checksums) = try await client.download(tag: update.tag)
+        let staged = StagedRelease(
+            version: update.version,
+            binary: archive.deletingLastPathComponent().appendingPathComponent("sapling"))
+        defer { try? FileManager.default.removeItem(at: checksums.deletingLastPathComponent()) }
+        do {
+            try verify(archive: archive, against: checksums)
+            Log.info("checksum verified")
+            _ = try await unpack(archive)
+        } catch {
+            discard(staged)
+            throw error
+        }
+        return staged
+    }
+
+    /// Swap in a staged release and restart into it.
     ///
     /// Does not return on success: `launchctl kickstart` replaces this
     /// process. The caller should treat a return as a failure.
     ///
-    /// - Parameters:
-    ///   - update: The version to install.
-    ///   - runningJobs: How many jobs are in flight; refuses unless zero.
-    ///   - force: Install even while jobs are running.
-    /// - Throws: `UpdateError` if the update cannot be applied safely.
-    public func apply(_ update: AvailableUpdate, runningJobs: Int, force: Bool) async throws {
+    /// - Parameter staged: A release from `stage(_:)`.
+    /// - Throws: If the binary cannot be swapped or the restart fails.
+    public func install(_ staged: StagedRelease) async throws {
         guard getuid() == 0 else { throw UpdateError.notRoot }
-        // Replacing the binary restarts the daemon, and a restart marks every
-        // in-flight job failed and reaps its VM.
-        guard runningJobs == 0 || force else { throw UpdateError.busy(runningJobs) }
-
-        Log.info("downloading \(update.version)")
-        let (archive, checksums) = try await client.download(tag: update.tag)
-        defer {
-            try? FileManager.default.removeItem(at: archive.deletingLastPathComponent())
-            try? FileManager.default.removeItem(at: checksums.deletingLastPathComponent())
-        }
-
-        try verify(archive: archive, against: checksums)
-        Log.info("checksum verified")
-
-        let binary = try await unpack(archive)
-        try install(binary)
-        Log.info("installed \(update.version); restarting")
-
+        try Self.swapBinary(at: SaplingPaths.installedBinary, with: staged.binary.path)
+        discard(staged)
+        Log.info("installed \(staged.version); restarting")
         try await restart()
+    }
+
+    /// Delete a staged release that will not be installed.
+    public func discard(_ staged: StagedRelease) {
+        try? FileManager.default.removeItem(at: staged.binary.deletingLastPathComponent())
     }
 
     // MARK: - Steps
@@ -146,11 +162,6 @@ public struct SelfUpdater: Sendable {
             throw UpdateError.notAnExecutable
         }
         return binary
-    }
-
-    /// Put the new binary in place, keeping the old one to fall back to.
-    func install(_ binary: URL) throws {
-        try Self.swapBinary(at: SaplingPaths.installedBinary, with: binary.path)
     }
 
     /// Replace the binary at `target`, keeping the previous one alongside it.
@@ -195,6 +206,15 @@ public struct SelfUpdater: Sendable {
     /// `kickstart -k` kills and relaunches, so this process does not come
     /// back — launchd starts a fresh one from the replaced binary.
     func restart() async throws {
-        _ = try await LaunchControl.restart()
+        let result = try await LaunchControl.restart()
+        guard result.succeeded else { throw UpdateError.restartFailed(LaunchControl.explain(result)) }
     }
+}
+
+/// A release downloaded, verified and unpacked, waiting to be installed.
+public struct StagedRelease: Sendable {
+    /// The version it contains.
+    public let version: String
+    /// The unpacked binary.
+    public let binary: URL
 }

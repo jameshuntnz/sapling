@@ -10,6 +10,26 @@ struct UpdateBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if let pending = model.status?.pendingUpdate {
+            scheduled(pending, waitingOn: model.status?.runningJobs ?? 0)
+        } else {
+            current
+        }
+    }
+
+    private func scheduled(_ version: String, waitingOn running: Int) -> some View {
+        banner(
+            symbol: "clock.arrow.circlepath",
+            tint: .accentColor,
+            title: "\(version) installs when jobs finish",
+            detail: "Verified and waiting on \(running) running job(s). New jobs wait until it's in."
+        ) {
+            Button("Cancel") { Task { await model.cancelUpdate() } }
+                .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder private var current: some View {
         switch model.updateState {
         case .none:
             EmptyView()
@@ -34,9 +54,9 @@ struct UpdateBanner: View {
                 ProgressView().controlSize(.small)
             }
         case .refused(let message):
-            // The overwhelmingly common reason is jobs running, which the
-            // daemon refuses rather than orphaning their VMs. Offering to
-            // override is the point of showing this at all.
+            // Busy nodes schedule rather than refuse, so this is a download,
+            // checksum or permission failure — or an older daemon that still
+            // refuses while jobs run.
             banner(
                 symbol: "exclamationmark.triangle.fill",
                 tint: .orange,
