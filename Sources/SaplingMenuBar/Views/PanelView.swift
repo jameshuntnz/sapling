@@ -62,9 +62,6 @@ struct PanelView: View {
                                 committedGB: status.committedMemoryGB,
                                 holdings: model.memoryHoldings)
                             SlotsView(slots: status.slots)
-                            if let total = status.diskTotalBytes, let free = status.diskFreeBytes {
-                                DiskSummaryRow(total: total, free: free) { showingDisk = true }
-                            }
                         }
 
                         if let metrics = status.metrics {
@@ -72,7 +69,9 @@ struct PanelView: View {
                                 SectionHeader(
                                     title: "Node",
                                     trailing: metrics.isUnderMemoryPressure ? "under pressure" : nil)
-                                MetricsView(metrics: metrics, history: model.metricsHistory)
+                                MetricsView(metrics: metrics, history: model.metricsHistory) {
+                                    showingDisk = true
+                                }
                             }
                         }
 

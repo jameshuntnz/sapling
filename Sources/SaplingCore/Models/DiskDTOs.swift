@@ -8,6 +8,8 @@ public enum DiskAction: String, Codable, Sendable, Hashable {
     case pruneImages = "prune_images"
     /// Drop the event logs of jobs that finished a while ago.
     case trimLogs = "trim_logs"
+    /// Delete the image builder and its layer cache; the next build recreates it.
+    case resetBuilder = "reset_builder"
 }
 
 /// One thing taking space on the node.
