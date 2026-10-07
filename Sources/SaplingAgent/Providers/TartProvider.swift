@@ -79,9 +79,10 @@ public struct TartProvider: JobProvider, Sendable {
         // `process`, because nothing awaits this task — see `VMBootProcess`
         // for the five minutes that cost.
         let process = VMBootProcess()
+        let runArguments = Self.runArguments(vmName: vmName, buildCache: request.buildCacheDirectory)
         let bootTask = Task.detached {
             do {
-                let command = try await Self.tart(["run", "--no-graphics", vmName])
+                let command = try await Self.tart(runArguments)
                 for try await chunk in ProcessRunner.stream(command.executable, command.arguments) {
                     switch chunk {
                     // stdout as well as stderr: tart reports at least some
@@ -184,6 +185,7 @@ public struct TartProvider: JobProvider, Sendable {
             set -o pipefail
             cd ~/actions-runner
             \(CacheEndpoint.exportScript(cache: request.cache, platform: .macos))
+            \(request.buildCacheDirectory == nil ? "" : "export SAPLING_BUILD_CACHE=\(shellQuote(Self.buildCacheGuestPath))")
             \(exports)./run.sh --jitconfig \(shellQuote(request.jitConfig))
             """
 

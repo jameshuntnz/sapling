@@ -40,6 +40,9 @@ struct ConfigReloadTests {
         config.linux.jobTimeoutSeconds = 900
         config.linux.defaultImage = "ghcr.io/acme/runner:2"
 
+        config.buildCache.enabled = true
+        config.buildCache.maxSizeGB = 40
+
         config.update.repository = "acme/sapling"
         config.update.channel = .dev
         config.update.checkIntervalHours = 12

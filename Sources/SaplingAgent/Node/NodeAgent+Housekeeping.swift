@@ -24,6 +24,9 @@ extension NodeAgent {
                 }
             }
             await pruneBuiltImages()
+            // A job cancelled mid-run cannot clean up after itself, so its
+            // lease waits here rather than for the next restart.
+            await buildCache.reapLeases(keeping: Set(runningJobs.keys))
         }
     }
 
@@ -56,6 +59,10 @@ extension NodeAgent {
     }
 
     func reapProviderOrphans() async {
+        let leases = await buildCache.reapLeases(keeping: Set(runningJobs.keys))
+        if !leases.isEmpty {
+            Log.warn("deleted orphaned build cache lease(s): \(leases.joined(separator: ", "))")
+        }
         if let macProvider {
             let reaped = await macProvider.reapOrphans()
             if !reaped.isEmpty { Log.warn("deleted orphaned VM(s): \(reaped.joined(separator: ", "))") }

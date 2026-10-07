@@ -33,6 +33,7 @@ extension NodeAgent {
             }
         }
 
+        var buildCacheLease: URL?
         do {
             // Resolved before the runner is registered: building an image can
             // take minutes, and a JIT runner minted first would be sitting in
@@ -70,6 +71,7 @@ extension NodeAgent {
 
             try await store.updateJobStatus(id: job.id, status: .running)
             if let image { try? await store.setJobImageRef(id: job.id, imageRef: image) }
+            buildCacheLease = await leaseBuildCache(for: job, events: events)
 
             let request = JobRunRequest(
                 jobID: job.id,
@@ -88,7 +90,8 @@ extension NodeAgent {
                 bootTimeout: .seconds(config.macos.bootTimeoutSeconds),
                 jobTimeout: .seconds(
                     job.platform == .macos ? config.macos.jobTimeoutSeconds : config.linux.jobTimeoutSeconds),
-                memoryGB: memoryGB(for: job)
+                memoryGB: memoryGB(for: job),
+                buildCacheDirectory: buildCacheLease
             )
 
             let outcome: JobOutcome
@@ -103,7 +106,13 @@ extension NodeAgent {
 
             await finalize(
                 job: job, outcome: outcome, runnerRan: await announcements.jobName, events: events)
+            if let lease = buildCacheLease {
+                await settleBuildCache(lease: lease, job: job, runnerName: runnerName, events: events)
+            }
         } catch {
+            // Never promoted from here: the job did not finish. A cancelled
+            // job's lease is left for `reapLeases`, since nothing may run now.
+            if let lease = buildCacheLease, !Task.isCancelled { await buildCache.discard(lease: lease) }
             // Cancellation is `abandon`'s to record, not ours. GRDB honours
             // task cancellation, so every store write from here would throw
             // `CancellationError` into a `try?` and silently do nothing —

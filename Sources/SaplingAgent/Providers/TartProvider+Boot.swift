@@ -9,6 +9,30 @@ import SaplingCore
 /// on a dead subnet spends the whole boot timeout on an SSH that was never
 /// going to connect, and the failure reads as a broken base image.
 extension TartProvider {
+    /// The name the build cache is shared under, which is also its folder name
+    /// in the guest.
+    static let buildCacheShareName = "sapling-cache"
+
+    /// Where a macOS guest finds the build cache.
+    ///
+    /// Tart shares directories over virtio-fs, and macOS guests automount every
+    /// share under this one folder, by name.
+    static var buildCacheGuestPath: String { "/Volumes/My Shared Files/\(buildCacheShareName)" }
+
+    /// Arguments for the `tart run` that boots a job's VM.
+    ///
+    /// - Parameters:
+    ///   - vmName: The clone to boot.
+    ///   - buildCache: Host directory to share as the build cache, if any.
+    /// - Returns: Everything after `tart` on the command line.
+    static func runArguments(vmName: String, buildCache: URL?) -> [String] {
+        var arguments = ["run", "--no-graphics"]
+        if let buildCache {
+            arguments.append("--dir=\(buildCacheShareName):\(buildCache.path)")
+        }
+        return arguments + [vmName]
+    }
+
     /// Fails the job unless a host bridge owns the VM's subnet.
     ///
     /// `tart ip` answers from a DHCP lease, so an address is not evidence of a

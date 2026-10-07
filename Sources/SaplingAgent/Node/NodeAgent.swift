@@ -115,6 +115,8 @@ public actor NodeAgent {
     /// How many runs have been refused on provenance since the daemon started.
     var forkRunsRefused = 0
     var networkGuardApplied = false
+    /// Build output kept between jobs; used only when `[build_cache]` is on.
+    let buildCache = BuildCache()
 
     /// Creates an agent for the given configuration and store.
     ///

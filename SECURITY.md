@@ -63,6 +63,16 @@ consequences of the model, not defects in it:
   `github.allow_public_repos`, every credential and every restart-only key.
   Disk cleanup re-checks its target against a fresh listing and refuses the
   base image, job clones and anything running.
+- **With `[build_cache]` on, jobs of one repository share build output.**
+  Every macOS job reads what the last successful default-branch run of the same
+  job left behind, through a directory mounted into its VM. That is shared state
+  between jobs, deliberately. It is bounded so it is never *more* trust than
+  already exists: only a job that succeeded on the default branch, on the
+  runner Sapling started for it, can write what later jobs read. A pull
+  request's job reads its base's output and its own writes are thrown away, so
+  no branch can put something into a release build that the default branch
+  didn't. Jobs in different repositories never share a directory. Off by
+  default.
 - **The daemon runs as root**, because managing the pf anchor requires it.
 - **A refused fork job stays queued on GitHub** until GitHub's own timeout.
   Sapling declines it; it cannot withdraw it, because GitHub has no per-job
@@ -80,6 +90,9 @@ consequences of the model, not defects in it:
   is default-deny to private ranges; a bypass is a real finding.
 - A job **escaping its VM or container** onto the host, or reaching another
   job's environment.
+- A job's output reaching the **build cache** read by other jobs when it ran
+  on anything but the repository's default branch, or reaching another
+  repository's cache at all.
 - **Credential disclosure**: the GitHub App private key, a PAT, or a JIT runner
   token appearing in logs, in the API's config response, in an error message,
   or anywhere readable from inside a job.
