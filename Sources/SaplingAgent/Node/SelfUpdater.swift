@@ -184,7 +184,8 @@ public struct SelfUpdater: Sendable {
         if fileManager.fileExists(atPath: backup) {
             try fileManager.removeItem(atPath: backup)
         }
-        if fileManager.fileExists(atPath: target) {
+        let movedAside = fileManager.fileExists(atPath: target)
+        if movedAside {
             try fileManager.moveItem(atPath: target, toPath: backup)
         }
         do {
@@ -192,8 +193,9 @@ public struct SelfUpdater: Sendable {
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
         } catch {
             // Put the working binary back rather than leaving the node with
-            // nothing to start.
-            if fileManager.fileExists(atPath: backup) {
+            // nothing to start — but only one this call moved, or a failed
+            // swap undoes someone else's successful one.
+            if movedAside {
                 try? fileManager.removeItem(atPath: target)
                 try? fileManager.moveItem(atPath: backup, toPath: target)
             }
