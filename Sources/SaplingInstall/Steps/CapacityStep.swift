@@ -43,7 +43,8 @@ public struct CapacityStep: InstallStep {
         return Self.assessNode(
             totalGB: totalGB,
             budgetGB: config.node.memoryBudgetGB(totalGB: totalGB),
-            overheadGB: config.node.environmentOverheadGB,
+            vmOverheadGB: config.node.overheadGB(for: .macos),
+            containerOverheadGB: config.node.overheadGB(for: .linux),
             macPerVMGB: config.macos.effectiveMaxConcurrent > 0 ? await resolvedMacMemoryGB() : nil,
             linuxPerGB: config.linux.effectiveMaxConcurrent > 0 ? config.linux.memoryGB : nil,
             linuxEnabled: config.linux.effectiveMaxConcurrent > 0)
@@ -71,14 +72,15 @@ public struct CapacityStep: InstallStep {
     /// - Parameters:
     ///   - totalGB: The machine's physical memory.
     ///   - budgetGB: What jobs may collectively hold.
-    ///   - overheadGB: What each environment costs beyond its guest.
+    ///   - vmOverheadGB: What each macOS VM costs beyond its guest.
+    ///   - containerOverheadGB: What each Linux container costs beyond its guest.
     ///   - macPerVMGB: Default macOS VM size, or nil when unknown or disabled.
     ///   - linuxPerGB: `linux.memory_gb`, or nil when unset or disabled.
     ///   - linuxEnabled: Whether Linux jobs run at all.
     /// - Returns: What `doctor` should report.
     static func assessNode(
-        totalGB: Int, budgetGB: Int, overheadGB: Int, macPerVMGB: Int?, linuxPerGB: Int?,
-        linuxEnabled: Bool
+        totalGB: Int, budgetGB: Int, vmOverheadGB: Int, containerOverheadGB: Int,
+        macPerVMGB: Int?, linuxPerGB: Int?, linuxEnabled: Bool
     ) -> StepState {
         guard budgetGB > 0 else {
             return .failed(
@@ -97,7 +99,10 @@ public struct CapacityStep: InstallStep {
         }
 
         var fits: [String] = []
-        for (name, size) in [("macOS", macPerVMGB), ("Linux", linuxPerGB)] {
+        let defaults = [
+            ("macOS", macPerVMGB, vmOverheadGB), ("Linux", linuxPerGB, containerOverheadGB),
+        ]
+        for (name, size, overheadGB) in defaults {
             guard let size, size > 0 else { continue }
             let charge = size + max(0, overheadGB)
             if charge > budgetGB {
@@ -151,8 +156,9 @@ public struct CapacityStep: InstallStep {
         let totalGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
         let budgetGB = config.node.memoryBudgetGB(totalGB: totalGB)
         // The largest guest the budget can hold once its overhead is paid.
-        let largestGB = max(0, budgetGB - max(0, config.node.environmentOverheadGB))
-        guard largestGB > 0 else {
+        let largestVMGB = max(0, budgetGB - config.node.overheadGB(for: .macos))
+        let largestContainerGB = max(0, budgetGB - config.node.overheadGB(for: .linux))
+        guard largestVMGB > 0 || largestContainerGB > 0 else {
             throw InstallError(
                 "\(totalGB)GB RAM, and node.memory_reserve_gb leaves nothing for jobs. No size "
                     + "will help; lower the reserve.")
@@ -163,16 +169,16 @@ public struct CapacityStep: InstallStep {
 
         if config.macos.effectiveMaxConcurrent > 0 {
             let current = await resolvedMacMemoryGB()
-            if current == nil || (current ?? 0) > largestGB {
-                let per = min(largestGB, Self.defaultMacOSGB)
+            if current == nil || (current ?? 0) > largestVMGB, largestVMGB > 0 {
+                let per = min(largestVMGB, Self.defaultMacOSGB)
                 updated.macos.memoryGB = per
                 changes.append("macos.memory_gb = \(per)")
             }
         }
         if config.linux.effectiveMaxConcurrent > 0 {
             let current = config.linux.memoryGB
-            if current == nil || (current ?? 0) > largestGB {
-                let per = min(largestGB, Self.defaultLinuxGB)
+            if current == nil || (current ?? 0) > largestContainerGB, largestContainerGB > 0 {
+                let per = min(largestContainerGB, Self.defaultLinuxGB)
                 updated.linux.memoryGB = per
                 changes.append("linux.memory_gb = \(per)")
             }

@@ -9,7 +9,8 @@ actually want to change.
 [node]
 name = "mac-mini-01"
 memory_reserve_gb = 2         # kept for the host; the rest is the job budget
-environment_overhead_gb = 2   # charged per VM/container on top of its size
+environment_overhead_gb = 2   # charged per macOS VM on top of its size
+container_overhead_gb = 1     # charged per Linux container on top of its size
 
 [server]
 bind = "tailscale"   # or "loopback", or an explicit address

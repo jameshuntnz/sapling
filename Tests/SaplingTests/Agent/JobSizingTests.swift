@@ -180,22 +180,46 @@ struct JobSizingTests {
 
     /// What the host really pays, measured on the 16GB node.
     ///
-    /// A VM costs its guest plus about 2GB, and so does a container. Charging
-    /// only the guest booked a 6GB VM beside a 6GB container as 12GB against a
-    /// 12GB budget while the machine paid about 16GB and paged — an iOS release
-    /// that takes eight minutes alone took twenty. Two 5GB VMs, measured off
-    /// swap, still fit.
+    /// A VM costs its guest plus about 2GB. Charging only the guest booked a
+    /// 6GB VM beside a 6GB container as 12GB against a 12GB budget while the
+    /// machine paid about 16GB and paged — an iOS release that takes eight
+    /// minutes alone took twenty. Two 5GB VMs, measured off swap, still fit.
     @Test("each environment is charged its overhead, so 6+6 waits and 5+5 runs")
     func overheadIsCharged() {
         let node = NodeConfig()
         let budget = node.memoryBudgetGB(totalGB: 16)
         #expect(budget == 14)
-        #expect(node.chargeGB(memoryGB: 6) == 8)
+        #expect(node.chargeGB(memoryGB: 6, platform: .macos) == 8)
 
-        #expect(!JobSizing.fits(memoryGB: node.chargeGB(memoryGB: 6), committedGB: 8, budgetGB: budget))
-        #expect(JobSizing.fits(memoryGB: node.chargeGB(memoryGB: 5), committedGB: 7, budgetGB: budget))
+        #expect(
+            !JobSizing.fits(
+                memoryGB: node.chargeGB(memoryGB: 6, platform: .macos), committedGB: 8, budgetGB: budget))
+        #expect(
+            JobSizing.fits(
+                memoryGB: node.chargeGB(memoryGB: 5, platform: .macos), committedGB: 7, budgetGB: budget))
         // A single job is never worse off than before: 12GB alone still fits.
-        #expect(JobSizing.fits(memoryGB: node.chargeGB(memoryGB: 12), committedGB: 0, budgetGB: budget))
+        #expect(
+            JobSizing.fits(
+                memoryGB: node.chargeGB(memoryGB: 12, platform: .macos), committedGB: 0, budgetGB: budget))
+    }
+
+    /// A container's footprint is its guest plus about 0.3GB, not a VM's 2GB.
+    ///
+    /// Charging containers the VM figure held two 6GB Linux jobs at 16GB of a
+    /// 14GB budget, and the node ran one build with three Linux slots idle.
+    @Test("containers are charged their own overhead, so two 6GB builds run together")
+    func containerOverheadIsSmaller() {
+        let node = NodeConfig()
+        let budget = node.memoryBudgetGB(totalGB: 16)
+        #expect(node.chargeGB(memoryGB: 6, platform: .linux) == 7)
+        #expect(
+            JobSizing.fits(
+                memoryGB: node.chargeGB(memoryGB: 6, platform: .linux), committedGB: 7, budgetGB: budget))
+        // A VM beside the container is still charged its full overhead.
+        #expect(
+            !JobSizing.fits(
+                memoryGB: node.chargeGB(memoryGB: 6, platform: .macos), committedGB: 7, budgetGB: budget))
+        #expect(node.overheadByPlatform == [.macos: 2, .linux: 1])
     }
 
     @Test("a request that fits only without its overhead is refused, and says so")

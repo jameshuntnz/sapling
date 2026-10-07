@@ -62,7 +62,7 @@ extension NodeAgent {
         // is not known, and under-charging over-commits the machine.
         var committedGB = try await store.committedMemoryGB(
             fallbackGB: max(defaultMemoryGB(for: .macos), defaultMemoryGB(for: .linux)),
-            overheadGB: config.node.environmentOverheadGB)
+            overheadGB: config.node.overheadByPlatform)
         let budgetGB = memoryBudgetGB
         let queued = try await store.jobs(status: .queued, limit: 50)
             .sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
@@ -78,7 +78,7 @@ extension NodeAgent {
             let wanted = memoryGB(for: job) ?? defaultMemoryGB(for: job.platform)
             // The guest is what the job asked for; the charge is what the host
             // will actually pay for it.
-            let charge = config.node.chargeGB(memoryGB: wanted)
+            let charge = config.node.chargeGB(memoryGB: wanted, platform: job.platform)
 
             // Stepped over, never waited for. Head-of-line reservation assumes
             // the job at the front will eventually fit; one larger than the
