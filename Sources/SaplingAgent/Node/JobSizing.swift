@@ -48,10 +48,12 @@ enum JobSizing {
     /// - Parameters:
     ///   - memoryGB: What the job asked for, once sized.
     ///   - budgetGB: What jobs may collectively hold on this machine.
+    ///   - overheadGB: What its environment costs beyond the guest, which the
+    ///     budget has to hold as well.
     ///   - ceilingGB: The platform's own ceiling on a request, if it has one.
     /// - Returns: A message naming the request and the limit, or nil.
     static func unschedulableReason(
-        memoryGB: Int?, budgetGB: Int, ceilingGB: Int?
+        memoryGB: Int?, budgetGB: Int, overheadGB: Int, ceilingGB: Int?
     ) -> String? {
         guard let memoryGB else { return nil }
         if let ceilingGB, memoryGB > ceilingGB {
@@ -59,10 +61,11 @@ enum JobSizing {
                 "the job asks for \(memoryGB)GB, above this node's per-job ceiling of "
                 + "\(ceilingGB)GB — raise max_memory_gb or lower the mem: label"
         }
-        if memoryGB > budgetGB {
+        if memoryGB + overheadGB > budgetGB {
             return
-                "the job asks for \(memoryGB)GB, more than the \(budgetGB)GB this node has "
-                + "for jobs at all — no amount of waiting will free it"
+                "the job asks for \(memoryGB)GB (\(memoryGB + overheadGB)GB with its environment's "
+                + "own overhead), more than the \(budgetGB)GB this node has for jobs at all — "
+                + "no amount of waiting will free it"
         }
         return nil
     }

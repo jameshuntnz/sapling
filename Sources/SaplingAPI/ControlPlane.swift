@@ -62,7 +62,9 @@ struct ControlPlane: Sendable {
         let fallbackGB = max(
             live.macos.memoryGB ?? MacOSConfig.baseImageDefaultMemoryGB,
             live.linux.memoryGB ?? LinuxConfig.containerDefaultMemoryGB)
-        let committedGB = (try? await store.committedMemoryGB(fallbackGB: fallbackGB)) ?? 0
+        let committedGB =
+            (try? await store.committedMemoryGB(
+                fallbackGB: fallbackGB, overheadGB: live.node.environmentOverheadGB)) ?? 0
 
         let dayAgo = Date().addingTimeInterval(-86400)
         let lastPollRaw = try await store.state(SaplingStore.StateKey.lastPollAt)

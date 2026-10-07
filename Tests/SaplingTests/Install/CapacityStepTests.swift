@@ -17,7 +17,7 @@ struct CapacityStepTests {
     @Test("reports how many of each default fit the budget")
     func reportsWhatFits() {
         let state = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 12, macPerVMGB: 6, linuxPerGB: 2, linuxEnabled: true)
+            totalGB: 16, budgetGB: 12, overheadGB: 0, macPerVMGB: 6, linuxPerGB: 2, linuxEnabled: true)
         #expect(state.isOK)
         // Two 6GB VMs or six 2GB containers, and any mix in between.
         #expect(state.summary.contains("2 x 6GB macOS"))
@@ -31,7 +31,7 @@ struct CapacityStepTests {
     @Test("a default that fits alone is fine even when two would not")
     func oversubscriptionIsAdmissionsProblem() {
         let state = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 12, macPerVMGB: 8, linuxPerGB: 2, linuxEnabled: true)
+            totalGB: 16, budgetGB: 12, overheadGB: 0, macPerVMGB: 8, linuxPerGB: 2, linuxEnabled: true)
         #expect(state.isOK)
         #expect(state.summary.contains("1 x 8GB macOS"))
     }
@@ -39,7 +39,7 @@ struct CapacityStepTests {
     @Test("a default larger than the whole budget fails, naming the fix")
     func defaultTooLarge() {
         let state = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 4, macPerVMGB: 8, linuxPerGB: 2, linuxEnabled: true)
+            totalGB: 16, budgetGB: 4, overheadGB: 0, macPerVMGB: 8, linuxPerGB: 2, linuxEnabled: true)
         guard case .failed(let reason) = state else {
             Issue.record("a default nothing can satisfy must fail: \(state)")
             return
@@ -52,7 +52,7 @@ struct CapacityStepTests {
     @Test("an unset linux.memory_gb is reported as the 1GB default it really is")
     func flagsUnsetLinuxMemory() {
         let state = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 12, macPerVMGB: 6, linuxPerGB: nil, linuxEnabled: true)
+            totalGB: 16, budgetGB: 12, overheadGB: 0, macPerVMGB: 6, linuxPerGB: nil, linuxEnabled: true)
         guard case .fixable(let reason) = state else {
             Issue.record("an unset size is a live under-provisioning, not ok: \(state)")
             return
@@ -68,7 +68,7 @@ struct CapacityStepTests {
     @Test("a reserve larger than the machine fails outright")
     func reserveEatsTheMachine() {
         let state = CapacityStep.assessNode(
-            totalGB: 4, budgetGB: 0, macPerVMGB: 6, linuxPerGB: 2, linuxEnabled: true)
+            totalGB: 4, budgetGB: 0, overheadGB: 0, macPerVMGB: 6, linuxPerGB: 2, linuxEnabled: true)
         guard case .failed(let reason) = state else {
             Issue.record("no budget at all must fail: \(state)")
             return
@@ -79,7 +79,7 @@ struct CapacityStepTests {
     @Test("says nothing about containers when Linux is disabled")
     func linuxDisabled() {
         let state = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 12, macPerVMGB: 6, linuxPerGB: nil, linuxEnabled: false)
+            totalGB: 16, budgetGB: 12, overheadGB: 0, macPerVMGB: 6, linuxPerGB: nil, linuxEnabled: false)
         #expect(state.isOK)
         #expect(!state.summary.contains("Linux"))
     }
@@ -87,18 +87,39 @@ struct CapacityStepTests {
     @Test("an unknown VM size is reported as unknown, not guessed at")
     func unknownSizes() {
         let state = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 12, macPerVMGB: nil, linuxPerGB: nil, linuxEnabled: false)
+            totalGB: 16, budgetGB: 12, overheadGB: 0, macPerVMGB: nil, linuxPerGB: nil, linuxEnabled: false)
         #expect(state.isOK)
         #expect(state.summary.contains("unknown"))
+    }
+
+    /// The defaults on a 16GB node, with each environment's overhead counted.
+    @Test("counts each environment's overhead against the budget")
+    func countsOverhead() {
+        let six = CapacityStep.assessNode(
+            totalGB: 16, budgetGB: 14, overheadGB: 2, macPerVMGB: 6, linuxPerGB: 2, linuxEnabled: true)
+        #expect(six.summary.contains("1 x 6GB macOS"))
+        #expect(six.summary.contains("3 x 2GB Linux"))
+
+        let five = CapacityStep.assessNode(
+            totalGB: 16, budgetGB: 14, overheadGB: 2, macPerVMGB: 5, linuxPerGB: 2, linuxEnabled: true)
+        #expect(five.summary.contains("2 x 5GB macOS"))
+
+        let tooBig = CapacityStep.assessNode(
+            totalGB: 16, budgetGB: 14, overheadGB: 2, macPerVMGB: 13, linuxPerGB: 2, linuxEnabled: true)
+        guard case .failed(let reason) = tooBig else {
+            Issue.record("a default that fits only without its overhead must fail: \(tooBig)")
+            return
+        }
+        #expect(reason.contains("15GB with the environment"))
     }
 
     /// Scaling is now a property of the budget, not of a slot count.
     @Test("a bigger machine simply fits more")
     func largerMachine() {
         let small = CapacityStep.assessNode(
-            totalGB: 16, budgetGB: 12, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true)
+            totalGB: 16, budgetGB: 12, overheadGB: 0, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true)
         let large = CapacityStep.assessNode(
-            totalGB: 64, budgetGB: 60, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true)
+            totalGB: 64, budgetGB: 60, overheadGB: 0, macPerVMGB: 6, linuxPerGB: 6, linuxEnabled: true)
         #expect(small.summary.contains("2 x 6GB macOS"))
         #expect(large.summary.contains("10 x 6GB macOS"))
     }

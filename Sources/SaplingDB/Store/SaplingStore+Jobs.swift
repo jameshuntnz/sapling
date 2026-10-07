@@ -142,10 +142,13 @@ extension SaplingStore {
     /// admitting work against memory a survivor is still holding is how a node
     /// over-commits itself after a crash.
     ///
-    /// - Parameter fallbackGB: Charged for jobs recorded before sizes existed.
+    /// - Parameters:
+    ///   - fallbackGB: Charged for jobs recorded before sizes existed.
+    ///   - overheadGB: Charged on top of every job, for what its environment
+    ///     costs the host beyond the guest. See `NodeConfig.environmentOverheadGB`.
     /// - Returns: Total GB reserved across both platforms.
     /// - Throws: If the database cannot be read.
-    public func committedMemoryGB(fallbackGB: Int) async throws -> Int {
+    public func committedMemoryGB(fallbackGB: Int, overheadGB: Int) async throws -> Int {
         let active = JobStatus.allCases.filter(\.occupiesSlot).map(\.rawValue)
         return try await writer.read { db in
             let placeholders = active.map { _ in "?" }.joined(separator: ",")
@@ -155,7 +158,7 @@ extension SaplingStore {
                 arguments: StatementArguments(active)
             )
             return rows.reduce(0) { total, row in
-                total + ((row["memory_gb"] as Int?) ?? fallbackGB)
+                total + ((row["memory_gb"] as Int?) ?? fallbackGB) + overheadGB
             }
         }
     }
