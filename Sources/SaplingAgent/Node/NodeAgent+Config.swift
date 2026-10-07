@@ -78,6 +78,7 @@ extension NodeAgent {
             {
                 reposRefreshedAt = nil
             }
+            await resizeQueuedJobs()
         }
         for change in restartRequired {
             Log.warn("config: \(change.key) needs a daemon restart to take effect")
@@ -94,6 +95,26 @@ extension NodeAgent {
             pendingRestart: restartRequired,
             warnings: warnings,
             message: Self.reloadSummary(applied: live.count, pending: restartRequired.count))
+    }
+
+    /// Re-sizes jobs that haven't started against the config just loaded.
+    ///
+    /// Sizes are recorded at discovery, so without this a job queued before
+    /// `memory_gb` changed still waits for the old size.
+    func resizeQueuedJobs() async {
+        do {
+            for job in try await store.jobs(status: .queued, limit: 500) {
+                guard
+                    let sized = JobSizing.memoryGB(
+                        labels: job.labels, platform: job.platform, config: config),
+                    sized != job.memoryGB
+                else { continue }
+                try await store.setJobMemoryGB(id: job.id, memoryGB: sized)
+                Log.info("re-sized queued job \(job.id) to \(sized)GB")
+            }
+        } catch {
+            Log.error("could not re-size queued jobs: \(error.localizedDescription)")
+        }
     }
 
     /// One line saying what a reload did and what it left.

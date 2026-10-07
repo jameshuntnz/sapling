@@ -253,7 +253,7 @@ final class AppModel {
             nodeCapacity: status.nodeCapacity,
             committedGB: status.committedMemoryGB,
             budgetGB: status.memoryBudgetGB,
-            sizeOf: { $0.memoryGB ?? 0 })
+            sizeOf: status.chargeGB(for:))
     }
 
     /// Queued jobs in the order they will run, which `queueReasons` relies on.

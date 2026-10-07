@@ -57,8 +57,23 @@ public struct StatusResponse: Codable, Sendable {
     /// Memory reserved by jobs currently holding a slot, in GB.
     public var committedMemoryGB: Int
 
+    /// What each platform's environment costs beyond its guest, in GB, keyed
+    /// by platform. `nil` from daemons that predate it.
+    public var overheadGB: [String: Int]?
+
     /// Memory not yet promised to a job, in GB.
     public var freeMemoryGB: Int { max(0, memoryBudgetGB - committedMemoryGB) }
+
+    /// What admission will charge a job against the budget: its guest plus
+    /// its platform's overhead, as the scheduler counts it.
+    ///
+    /// Older daemons don't report overhead, so the defaults stand in for it.
+    public func chargeGB(for job: Job) -> Int {
+        let overhead =
+            overheadGB?[job.platform.rawValue]
+            ?? NodeConfig(name: node.name).overheadGB(for: job.platform)
+        return (job.memoryGB ?? 0) + overhead
+    }
     /// Jobs discovered but not yet started.
     public var queuedJobs: Int
     /// Jobs currently holding a slot.
@@ -106,6 +121,7 @@ public struct StatusResponse: Codable, Sendable {
         nodeCapacity: Int = 0,
         memoryBudgetGB: Int = 0,
         committedMemoryGB: Int = 0,
+        overheadGB: [String: Int]? = nil,
         queuedJobs: Int,
         runningJobs: Int,
         completedLast24h: Int,
@@ -127,6 +143,7 @@ public struct StatusResponse: Codable, Sendable {
         self.nodeCapacity = nodeCapacity
         self.memoryBudgetGB = memoryBudgetGB
         self.committedMemoryGB = committedMemoryGB
+        self.overheadGB = overheadGB
         self.queuedJobs = queuedJobs
         self.runningJobs = runningJobs
         self.completedLast24h = completedLast24h

@@ -102,4 +102,28 @@ struct QueueExplainerTests {
         let ordered = QueueExplainer.schedulingOrder([newer, older])
         #expect(ordered.map(\.id) == ["1", "2"])
     }
+
+    /// A queued VM is charged its overhead, as the scheduler charges it.
+    ///
+    /// The node on 2026-10-08: a 6GB Linux job running, a 6GB macOS job queued.
+    /// By guest size alone the VM fits in the 7GB left; with its overhead it does not.
+    @Test("queued jobs are sized with their platform's overhead")
+    func sizedWithOverhead() {
+        var vm = job("1", .macos, "check")
+        vm.memoryGB = 6
+        let status = StatusResponse(
+            version: "test",
+            node: Node(id: "n", name: "n", platform: "darwin/arm64", lastSeenAt: nil, status: .online),
+            slots: [], memoryBudgetGB: 14, committedMemoryGB: 7,
+            overheadGB: ["macos": 2, "linux": 1],
+            queuedJobs: 1, runningJobs: 1, completedLast24h: 0, failedLast24h: 0,
+            watchedRepos: [], lastPollAt: nil, lastPollError: nil)
+        #expect(status.chargeGB(for: vm) == 8)
+
+        let reasons = QueueExplainer.explain(
+            queued: [vm], inUse: [.linux: 1], capacity: [.linux: 4, .macos: 2],
+            nodeCapacity: 6, committedGB: status.committedMemoryGB,
+            budgetGB: status.memoryBudgetGB, sizeOf: status.chargeGB(for:))
+        #expect(reasons["1"] == .waitingForMemory(wantsGB: 8, freeGB: 7))
+    }
 }
