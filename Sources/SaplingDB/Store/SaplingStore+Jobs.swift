@@ -120,6 +120,25 @@ extension SaplingStore {
         }
     }
 
+    /// Records which GitHub job this node's runner actually picked up.
+    ///
+    /// - Parameters:
+    ///   - id: The job the runner was started for.
+    ///   - jobID: GitHub's id for the job the runner took.
+    ///   - runID: The workflow run that job belongs to.
+    /// - Throws: If the database cannot be written.
+    public func setJobAssignment(id: String, jobID: String, runID: String) async throws {
+        try await writer.write { db in
+            guard var record = try JobRecord.fetchOne(db, key: id),
+                record.assignedJobId != jobID || record.assignedRunId != runID
+            else { return }
+            record.assignedJobId = jobID
+            record.assignedRunId = runID
+            record.updatedAt = Date()
+            try record.update(db)
+        }
+    }
+
     /// Image refs used by jobs updated since a cutoff.
     ///
     /// Drives image retention: anything not in this set is a build nothing has

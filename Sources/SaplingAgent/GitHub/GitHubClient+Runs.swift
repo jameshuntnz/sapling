@@ -20,6 +20,8 @@ extension GitHubClient {
         let jobs: [WorkflowJob]
         /// Runs skipped on provenance, so the caller can say so once.
         let refusedRuns: [RefusedRun]
+        /// In-progress jobs, keyed by the runner GitHub gave them to.
+        var assigned: [String: WorkflowJob] = [:]
     }
 
     /// Every job GitHub currently reports as queued for a repo, minus anything
@@ -51,6 +53,7 @@ extension GitHubClient {
 
         var jobs: [WorkflowJob] = []
         var refused: [RefusedRun] = []
+        var assigned: [String: WorkflowJob] = [:]
         for run in runs.values.sorted(by: { $0.id < $1.id }) {
             let origin = ForkPolicy.origin(
                 headRepositoryFullName: run.headRepository?.fullName,
@@ -66,8 +69,11 @@ extension GitHubClient {
                 as: WorkflowJobsResponse.self
             )
             jobs.append(contentsOf: response.jobs.filter(\.isQueued))
+            for job in response.jobs where job.isInProgress {
+                if let runner = job.runnerName { assigned[runner] = job }
+            }
         }
-        return QueuedWork(jobs: jobs, refusedRuns: refused)
+        return QueuedWork(jobs: jobs, refusedRuns: refused, assigned: assigned)
     }
 
     /// Every job in one workflow run.

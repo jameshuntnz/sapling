@@ -29,7 +29,14 @@ extension AppModel {
 extension Job {
     /// The job's page on GitHub, or its repository's Actions page when the
     /// run is not known.
+    ///
+    /// Prefers the job the runner actually took: a JIT runner can pick up a
+    /// different queued job, leaving `id` itself still queued.
     var gitHubURL: URL? {
+        if let assignedJobID, let assignedRunID {
+            return URL(
+                string: "https://github.com/\(repo)/actions/runs/\(assignedRunID)/job/\(assignedJobID)")
+        }
         guard let runID = workflowRunID else {
             return URL(string: "https://github.com/\(repo)/actions")
         }

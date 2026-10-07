@@ -122,6 +122,8 @@ extension SaplingStore {
         record.startedAt = nil
         record.completedAt = nil
         record.exitReason = nil
+        record.assignedJobId = nil
+        record.assignedRunId = nil
         try record.update(db)
         return .requeued(attempt: record.attempts + 1)
     }
@@ -174,6 +176,8 @@ extension SaplingStore {
             record.startedAt = nil
             record.completedAt = nil
             record.exitReason = nil
+            record.assignedJobId = nil
+            record.assignedRunId = nil
             record.updatedAt = Date()
             try record.update(db)
             return .queued

@@ -97,6 +97,13 @@ enum SaplingMigrations {
             }
         }
 
+        migrator.registerMigration("v6_job_assignment") { db in
+            try db.alter(table: "jobs") { t in
+                t.add(column: "assigned_job_id", .text)
+                t.add(column: "assigned_run_id", .text)
+            }
+        }
+
         return migrator
     }
 }
