@@ -61,7 +61,8 @@ extension NodeAgent {
         // since which platform an unsized survivor belonged to is exactly what
         // is not known, and under-charging over-commits the machine.
         var committedGB = try await store.committedMemoryGB(
-            fallbackGB: max(defaultMemoryGB(for: .macos), defaultMemoryGB(for: .linux)))
+            fallbackGB: max(defaultMemoryGB(for: .macos), defaultMemoryGB(for: .linux)),
+            overheadGB: config.node.environmentOverheadGB)
         let budgetGB = memoryBudgetGB
         let queued = try await store.jobs(status: .queued, limit: 50)
             .sorted { ($0.queuedAt ?? .distantPast) < ($1.queuedAt ?? .distantPast) }
@@ -75,15 +76,18 @@ extension NodeAgent {
             guard !blockedByOtherPlatform(job.platform, inUse: inUse) else { continue }
 
             let wanted = memoryGB(for: job) ?? defaultMemoryGB(for: job.platform)
+            // The guest is what the job asked for; the charge is what the host
+            // will actually pay for it.
+            let charge = config.node.chargeGB(memoryGB: wanted)
 
             // Stepped over, never waited for. Head-of-line reservation assumes
             // the job at the front will eventually fit; one larger than the
             // whole budget never will, so blocking behind it stalls the node
             // permanently. Discovery refuses these, but config can shrink under
             // a job that is already queued.
-            guard wanted <= budgetGB else { continue }
+            guard charge <= budgetGB else { continue }
 
-            guard JobSizing.fits(memoryGB: wanted, committedGB: committedGB, budgetGB: budgetGB)
+            guard JobSizing.fits(memoryGB: charge, committedGB: committedGB, budgetGB: budgetGB)
             else {
                 // Head-of-line reservation. Skipping to a job that does fit
                 // would let a stream of small jobs starve a large one
@@ -93,7 +97,7 @@ extension NodeAgent {
             }
 
             inUse[job.platform] = used + 1
-            committedGB += wanted
+            committedGB += charge
             await dispatch(job, memoryGB: wanted)
         }
     }

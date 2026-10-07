@@ -76,7 +76,7 @@ struct JobSizingTests {
     /// A job asking for more than the machine has is not waiting for capacity.
     @Test("a request beyond the node's whole budget is refused, not queued")
     func refusesImpossible() {
-        let reason = JobSizing.unschedulableReason(memoryGB: 32, budgetGB: 12, ceilingGB: nil)
+        let reason = JobSizing.unschedulableReason(memoryGB: 32, budgetGB: 12, overheadGB: 0, ceilingGB: nil)
         #expect(reason != nil)
         #expect(reason?.contains("32GB") == true)
         #expect(reason?.contains("12GB") == true)
@@ -86,14 +86,15 @@ struct JobSizingTests {
 
     @Test("a request over the platform ceiling names the setting")
     func refusesOverCeiling() {
-        let reason = JobSizing.unschedulableReason(memoryGB: 16, budgetGB: 64, ceilingGB: 8)
+        let reason = JobSizing.unschedulableReason(memoryGB: 16, budgetGB: 64, overheadGB: 0, ceilingGB: 8)
         #expect(reason?.contains("max_memory_gb") == true)
     }
 
     @Test("what fits is not refused")
     func allowsFitting() {
-        #expect(JobSizing.unschedulableReason(memoryGB: 6, budgetGB: 12, ceilingGB: 8) == nil)
-        #expect(JobSizing.unschedulableReason(memoryGB: nil, budgetGB: 12, ceilingGB: 8) == nil)
+        #expect(JobSizing.unschedulableReason(memoryGB: 6, budgetGB: 12, overheadGB: 0, ceilingGB: 8) == nil)
+        #expect(
+            JobSizing.unschedulableReason(memoryGB: nil, budgetGB: 12, overheadGB: 0, ceilingGB: 8) == nil)
     }
 
     // MARK: - Admission
@@ -138,8 +139,10 @@ struct JobSizingTests {
         #expect(!JobSizing.fits(memoryGB: 32, committedGB: 0, budgetGB: 12))
         // Which is exactly why it must be identifiable as impossible, not
         // merely as not-fitting-right-now.
-        #expect(JobSizing.unschedulableReason(memoryGB: 32, budgetGB: 12, ceilingGB: nil) != nil)
-        #expect(JobSizing.unschedulableReason(memoryGB: 12, budgetGB: 12, ceilingGB: nil) == nil)
+        #expect(
+            JobSizing.unschedulableReason(memoryGB: 32, budgetGB: 12, overheadGB: 0, ceilingGB: nil) != nil)
+        #expect(
+            JobSizing.unschedulableReason(memoryGB: 12, budgetGB: 12, overheadGB: 0, ceilingGB: nil) == nil)
     }
 
     /// The failure that cost a debugging cycle and a million page-outs.
@@ -160,7 +163,9 @@ struct JobSizingTests {
         #expect(!JobSizing.fits(memoryGB: 8, committedGB: 8, budgetGB: budget))
         // And it is a job worth waiting for, not one to refuse outright: it
         // runs perfectly well once the first VM finishes.
-        #expect(JobSizing.unschedulableReason(memoryGB: 8, budgetGB: budget, ceilingGB: nil) == nil)
+        #expect(
+            JobSizing.unschedulableReason(memoryGB: 8, budgetGB: budget, overheadGB: 0, ceilingGB: nil) == nil
+        )
     }
 
     @Test("the budget is the machine less the host's reserve")
@@ -171,6 +176,35 @@ struct JobSizingTests {
         // A machine smaller than its own reserve owes jobs nothing, not a
         // negative number the arithmetic would then admit against.
         #expect(node.memoryBudgetGB(totalGB: 2) == 0)
+    }
+
+    /// What the host really pays, measured on the 16GB node.
+    ///
+    /// A VM costs its guest plus about 2GB, and so does a container. Charging
+    /// only the guest booked a 6GB VM beside a 6GB container as 12GB against a
+    /// 12GB budget while the machine paid about 16GB and paged — an iOS release
+    /// that takes eight minutes alone took twenty. Two 5GB VMs, measured off
+    /// swap, still fit.
+    @Test("each environment is charged its overhead, so 6+6 waits and 5+5 runs")
+    func overheadIsCharged() {
+        let node = NodeConfig()
+        let budget = node.memoryBudgetGB(totalGB: 16)
+        #expect(budget == 14)
+        #expect(node.chargeGB(memoryGB: 6) == 8)
+
+        #expect(!JobSizing.fits(memoryGB: node.chargeGB(memoryGB: 6), committedGB: 8, budgetGB: budget))
+        #expect(JobSizing.fits(memoryGB: node.chargeGB(memoryGB: 5), committedGB: 7, budgetGB: budget))
+        // A single job is never worse off than before: 12GB alone still fits.
+        #expect(JobSizing.fits(memoryGB: node.chargeGB(memoryGB: 12), committedGB: 0, budgetGB: budget))
+    }
+
+    @Test("a request that fits only without its overhead is refused, and says so")
+    func overheadCountsTowardRefusal() {
+        let reason = JobSizing.unschedulableReason(
+            memoryGB: 13, budgetGB: 14, overheadGB: 2, ceilingGB: nil)
+        #expect(reason?.contains("15GB with its environment") == true)
+        #expect(
+            JobSizing.unschedulableReason(memoryGB: 12, budgetGB: 14, overheadGB: 2, ceilingGB: nil) == nil)
     }
 
     /// An override states the budget instead of deriving it.
@@ -197,6 +231,8 @@ struct JobSizingTests {
         #expect(budget == 2)
         #expect(JobSizing.fits(memoryGB: 2, committedGB: 0, budgetGB: budget))
         // And refuses, rather than silently queueing, what it cannot hold.
-        #expect(JobSizing.unschedulableReason(memoryGB: 8, budgetGB: budget, ceilingGB: nil) != nil)
+        #expect(
+            JobSizing.unschedulableReason(memoryGB: 8, budgetGB: budget, overheadGB: 0, ceilingGB: nil) != nil
+        )
     }
 }

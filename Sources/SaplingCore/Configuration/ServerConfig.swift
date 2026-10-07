@@ -74,7 +74,22 @@ public struct NodeConfig: Codable, Sendable {
     /// next job's memory would cross it. Kept configurable because the right
     /// figure is a property of the machine — a node doing nothing else needs
     /// less than one that is also somebody's desktop.
+    ///
+    /// Two, not the four it once was: the four was quietly absorbing part of
+    /// what each environment costs beyond its guest, and that is now charged
+    /// per environment by `environmentOverheadGB` instead. The host itself is
+    /// small — the daemon measured 39MB.
     public var memoryReserveGB: Int
+
+    /// What each running environment costs the host beyond its guest, in GB.
+    ///
+    /// Charged on top of every job's size, because the host pays it whether or
+    /// not anyone counts it. Measured on a 16GB node: a Tart VM's resident size
+    /// is its guest plus 2.1–2.2GB from boot, and a `container` job given 3GB
+    /// sat at 4.96GB. Charging only the guest booked a 6GB VM beside a 6GB
+    /// container as 12GB against a 12GB budget while the machine paid about
+    /// 16GB, and an iOS release that takes eight minutes alone took twenty.
+    public var environmentOverheadGB: Int
 
     /// Job memory budget in GB, stated outright instead of derived.
     ///
@@ -97,6 +112,14 @@ public struct NodeConfig: Codable, Sendable {
         return max(0, totalGB - memoryReserveGB)
     }
 
+    /// What a job of this size is charged against the budget, in GB.
+    ///
+    /// - Parameter memoryGB: The guest size the job runs with.
+    /// - Returns: That size plus the environment's own overhead.
+    public func chargeGB(memoryGB: Int) -> Int {
+        memoryGB + max(0, environmentOverheadGB)
+    }
+
     /// Jobs this node will run at once, after clamping.
     ///
     /// Falls back to the sum of the platform ceilings, which is the uncapped
@@ -112,6 +135,7 @@ public struct NodeConfig: Codable, Sendable {
         case maxConcurrent = "max_concurrent"
         case memoryReserveGB = "memory_reserve_gb"
         case memoryBudgetOverrideGB = "memory_budget_gb"
+        case environmentOverheadGB = "environment_overhead_gb"
     }
 
     /// Creates a server configuration.
@@ -119,14 +143,16 @@ public struct NodeConfig: Codable, Sendable {
         name: String = Host.current().localizedName ?? "sapling-node",
         serializePlatforms: Bool = false,
         maxConcurrent: Int? = nil,
-        memoryReserveGB: Int = 4,
-        memoryBudgetOverrideGB: Int? = nil
+        memoryReserveGB: Int = 2,
+        memoryBudgetOverrideGB: Int? = nil,
+        environmentOverheadGB: Int = 2
     ) {
         self.name = name
         self.serializePlatforms = serializePlatforms
         self.maxConcurrent = maxConcurrent
         self.memoryReserveGB = memoryReserveGB
         self.memoryBudgetOverrideGB = memoryBudgetOverrideGB
+        self.environmentOverheadGB = environmentOverheadGB
     }
 
     /// Creates a server configuration.
@@ -138,8 +164,9 @@ public struct NodeConfig: Codable, Sendable {
             ?? "sapling-node"
         serializePlatforms = try c.decodeIfPresent(Bool.self, forKey: .serializePlatforms) ?? false
         maxConcurrent = try c.decodeIfPresent(Int.self, forKey: .maxConcurrent)
-        memoryReserveGB = try c.decodeIfPresent(Int.self, forKey: .memoryReserveGB) ?? 4
+        memoryReserveGB = try c.decodeIfPresent(Int.self, forKey: .memoryReserveGB) ?? 2
         memoryBudgetOverrideGB = try c.decodeIfPresent(Int.self, forKey: .memoryBudgetOverrideGB)
+        environmentOverheadGB = try c.decodeIfPresent(Int.self, forKey: .environmentOverheadGB) ?? 2
     }
 }
 
