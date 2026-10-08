@@ -184,9 +184,11 @@ public struct TartProvider: JobProvider, Sendable {
         let command = """
             set -o pipefail
             cd ~/actions-runner
+            \(JobGate.installScript(repo: request.repo))
             \(CacheEndpoint.exportScript(cache: request.cache, platform: .macos))
             \(request.buildCacheDirectory == nil ? "" : "export SAPLING_BUILD_CACHE=\(shellQuote(Self.buildCacheGuestPath))")
-            \(exports)./run.sh --jitconfig \(shellQuote(request.jitConfig))
+            IFS= read -r sapling_jit
+            \(exports)./run.sh --jitconfig "$sapling_jit"
             """
 
         await events.record(RunEventName.runnerStarted, detail: request.runnerName)
@@ -194,7 +196,11 @@ public struct TartProvider: JobProvider, Sendable {
         let exitCode = try await withThrowingTaskGroup(of: Int32?.self) { group in
             group.addTask {
                 var status: Int32 = -1
-                for try await chunk in ProcessRunner.stream("ssh", sshArguments(ip: ip) + [command]) {
+                // The runner credential goes over stdin: ssh's arguments are
+                // visible to every local user through `ps`.
+                let stream = ProcessRunner.stream(
+                    "ssh", sshArguments(ip: ip) + [command], standardInput: request.jitConfig + "\n")
+                for try await chunk in stream {
                     switch chunk {
                     case .stdout(let text), .stderr(let text):
                         await events.log(text)

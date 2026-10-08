@@ -65,8 +65,11 @@ extension NodeAgent {
             overheadGB: config.node.overheadByPlatform)
         let budgetGB = memoryBudgetGB
         let queued = QueueExplainer.schedulingOrder(try await store.jobs(status: .queued, limit: 50))
+        // A repository dropped from the watch list — removed from config, or
+        // made public — keeps its stored jobs, which must not run on its say.
+        let watched = Set(await watchedRepos().map { $0.lowercased() })
 
-        for job in queued {
+        for job in queued where watched.contains(job.repo.lowercased()) {
             let used = inUse[job.platform] ?? 0
             guard used < capacity(for: job.platform) else { continue }
             // Checked against the live total rather than a running counter, so

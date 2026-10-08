@@ -32,7 +32,7 @@ extension NodeAgent {
             return
         }
         do {
-            let applied = try await NetworkGuard(config: config.network).apply()
+            let applied = try await NetworkGuard(node: config).apply()
             networkGuardApplied = true
             Log.info("egress filter active on \(applied.jobSubnets.joined(separator: ", "))")
         } catch NetworkGuardError.noJobNetworks {

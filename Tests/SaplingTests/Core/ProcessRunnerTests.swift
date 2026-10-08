@@ -90,12 +90,12 @@ struct ProcessRunnerTests {
     /// launchd hands daemons a minimal PATH with no Homebrew in it, which is
     /// how `tart` resolves interactively and mysteriously doesn't under the
     /// LaunchDaemon.
-    @Test("prepends Homebrew to PATH and de-duplicates")
+    @Test("puts Homebrew on PATH after the system directories, de-duplicated")
     func environmentPath() {
         let env = ProcessRunner.defaultEnvironment()
         let path = env["PATH"] ?? ""
-        #expect(path.hasPrefix("/opt/homebrew/bin"))
-        #expect(path.contains("/usr/bin"))
+        #expect(path.hasPrefix("/usr/bin"))
+        #expect(path.contains("/opt/homebrew/bin"))
 
         let entries = path.split(separator: ":").map(String.init)
         #expect(entries.count == Set(entries).count, "PATH should not contain duplicates")
@@ -121,6 +121,20 @@ struct ProcessRunnerTests {
         #expect(stdout.joined().contains("one"))
         #expect(stderr.joined().contains("two"))
         #expect(exitCode == 7)
+    }
+
+    /// How the runner credential reaches a VM without appearing in `ps`.
+    @Test("streaming feeds standard input, in zsh as in sh")
+    func streamingInput() async throws {
+        for shell in ["/bin/sh", "/bin/zsh"] {
+            var stdout = ""
+            let stream = ProcessRunner.stream(
+                shell, ["-c", #"IFS= read -r secret; echo "got $secret""#], standardInput: "a b'c\n")
+            for try await chunk in stream {
+                if case .stdout(let text) = chunk { stdout += text }
+            }
+            #expect(stdout.contains("got a b'c"), "\(shell)")
+        }
     }
 
     /// The tail of a job's log lands between the last readability callback

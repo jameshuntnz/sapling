@@ -152,8 +152,11 @@ public struct SelfUpdater: Sendable {
     /// Extract the binary from the archive.
     func unpack(_ archive: URL) async throws -> URL {
         let directory = archive.deletingLastPathComponent()
+        // Only the one member, and owned by root rather than the release
+        // builder's uid, which bsdtar run as root would otherwise restore.
         let result = try await ProcessRunner.run(
-            "tar", ["xzf", archive.path, "-C", directory.path], timeout: .seconds(120))
+            "/usr/bin/tar", ["--no-same-owner", "-xzf", archive.path, "-C", directory.path, "sapling"],
+            timeout: .seconds(120))
         guard result.succeeded else {
             throw UpdateError.unpackFailed(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -189,8 +192,7 @@ public struct SelfUpdater: Sendable {
             try fileManager.moveItem(atPath: target, toPath: backup)
         }
         do {
-            try fileManager.copyItem(atPath: replacement, toPath: target)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
+            try BinaryInstall.copy(from: replacement, to: target)
         } catch {
             // Put the working binary back rather than leaving the node with
             // nothing to start — but only one this call moved, or a failed

@@ -43,6 +43,7 @@ struct APITests {
         app.logger.logLevel = .critical
         app.middleware = .init()
         app.middleware.use(JSONErrorMiddleware())
+        app.middleware.use(BrowserGuardMiddleware())
         try registerRoutes(
             app, controlPlane: controlPlane,
             advertisedURL: "http://127.0.0.1:\(app.http.server.configuration.port)")

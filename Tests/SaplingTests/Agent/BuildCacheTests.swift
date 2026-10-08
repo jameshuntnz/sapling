@@ -130,40 +130,59 @@ struct BuildCachePolicyTests {
     ) -> WorkflowJob {
         WorkflowJob(
             id: 1, runId: 2, name: "build", status: "completed", conclusion: conclusion,
-            labels: [], headSha: nil, headBranch: branch, startedAt: nil, completedAt: nil,
+            labels: [], headSha: "abc", headBranch: branch, startedAt: nil, completedAt: nil,
             runnerName: runner)
     }
 
-    @Test("a successful default-branch job on our runner is promoted")
+    func run(event: String? = "push", head: String? = "acme/widgets") -> WorkflowRun {
+        WorkflowRun(
+            id: 2, name: "CI", status: "completed", event: event, headBranch: "main",
+            headRepository: RunHeadRepository(fullName: head))
+    }
+
+    func refusal(
+        _ remote: WorkflowJob, run: WorkflowRun? = nil, runner: String = "sap-macos-1",
+        defaultBranch: String? = "main", merged: Bool? = true
+    ) -> String? {
+        BuildCachePolicy.refusal(
+            remote: remote, run: run ?? self.run(), repo: "acme/widgets", runnerName: runner,
+            defaultBranch: defaultBranch, onDefaultBranch: merged)
+    }
+
+    @Test("a successful default-branch push on our runner is promoted")
     func promotes() {
-        #expect(
-            BuildCachePolicy.refusal(remote: job(), runnerName: "sap-macos-1", defaultBranch: "main") == nil)
+        #expect(refusal(job()) == nil)
+        #expect(refusal(job(), run: run(event: "schedule")) == nil)
     }
 
     /// A release builds from this cache, and the node installs its releases.
     @Test("a pull request's branch reads the cache but never writes it")
     func branchesDoNotWrite() {
-        let refusal = BuildCachePolicy.refusal(
-            remote: job(branch: "feature"), runnerName: "sap-macos-1", defaultBranch: "main")
-        #expect(refusal?.contains("only main") == true)
+        #expect(refusal(job(branch: "feature"))?.contains("only main") == true)
     }
 
     /// A JIT runner takes any queued job that matches its labels.
     @Test("output from a job that ran on another runner is not promoted")
     func otherRunner() {
-        let refusal = BuildCachePolicy.refusal(
-            remote: job(runner: "sap-macos-2"), runnerName: "sap-macos-1", defaultBranch: "main")
-        #expect(refusal != nil)
+        #expect(refusal(job(runner: "sap-macos-2")) != nil)
+    }
+
+    /// These name the default branch while running whatever a pull request,
+    /// or a tag of the same name, points at.
+    @Test("comment, pull_request_target and workflow_run triggers, and tags named main, refuse")
+    func lookalikesOfMain() {
+        for event in ["issue_comment", "pull_request_target", "workflow_run", nil] {
+            #expect(refusal(job(), run: run(event: event)) != nil, "\(event ?? "nil")")
+        }
+        #expect(refusal(job(), run: run(head: "mallory/widgets")) != nil)
+        #expect(refusal(job(), merged: false)?.contains("not on main") == true)
+        #expect(refusal(job(), merged: nil) != nil)
     }
 
     @Test("failure, an unfinished job, or an unknown default branch all refuse")
     func refusals() {
-        #expect(
-            BuildCachePolicy.refusal(
-                remote: job(conclusion: "failure"), runnerName: "sap-macos-1", defaultBranch: "main") != nil)
-        #expect(BuildCachePolicy.refusal(remote: job(), runnerName: "sap-macos-1", defaultBranch: nil) != nil)
-        #expect(
-            BuildCachePolicy.refusal(
-                remote: job(branch: nil), runnerName: "sap-macos-1", defaultBranch: "main") != nil)
+        #expect(refusal(job(conclusion: "failure")) != nil)
+        #expect(refusal(job(), defaultBranch: nil) != nil)
+        #expect(refusal(job(branch: nil)) != nil)
     }
 }

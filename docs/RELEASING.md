@@ -187,12 +187,10 @@ sapling update --check
 
 If the running version *outranks* everything published — a locally built
 binary, or a version stamp that got ahead — then nothing published is an
-upgrade, and that is the correct answer to the question asked. To install the
-newest release anyway:
-
-```bash
-sapling update --force
-```
+upgrade, and that is the correct answer to the question asked. `sapling update
+--force` reinstalls the newest release when it is the running version, but
+never installs an older one: the API is unauthenticated, so a downgrade is done
+on the node with `sapling upgrade --binary`, as below.
 
 The development placeholder is `0.0.0-dev` precisely so this doesn't happen: a
 locally built binary sorts below every release. It was `0.1.0` once, which is a

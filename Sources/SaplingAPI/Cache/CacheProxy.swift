@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SaplingCore
 import Vapor
@@ -159,7 +160,7 @@ actor CacheProxy {
             throw Abort(.badRequest, reason: "bad upstream path")
         }
 
-        let (tempURL, response) = try await session.download(from: url)
+        let (tempURL, response) = try await session.download(from: url, delegate: RedirectGuard())
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             try? FileManager.default.removeItem(at: tempURL)
             // A stale copy beats failing the job when upstream is unhappy.
@@ -208,12 +209,12 @@ actor CacheProxy {
 
     /// Hash the path so arbitrarily deep module paths can't blow past the
     /// filesystem's name limits, and keep a readable suffix for debugging.
+    ///
+    /// Every job on the node shares these entries, and immutable ones are
+    /// served forever, so the hash must resist a job crafting a collision
+    /// with a package another repository depends on.
     static func cacheKey(upstream: String, path: String) -> String {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in Array(path.utf8) {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x100_0000_01b3
-        }
+        let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
         let readable =
             path
             .split(separator: "/")
@@ -221,7 +222,7 @@ actor CacheProxy {
             .joined(separator: "_")
             .filter { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-" }
             .suffix(60)
-        return String(format: "%016llx", hash) + "_" + readable
+        return hash + "_" + readable
     }
 
     struct CacheEntry: Sendable {

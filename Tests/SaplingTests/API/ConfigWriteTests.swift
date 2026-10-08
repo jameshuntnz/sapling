@@ -67,7 +67,7 @@ struct ConfigWriteTests {
         try await withControlPlane { controlPlane, url in
             for key in [
                 "update.repository", "github.allow_public_repos", "build_cache.enabled", "github.token",
-                "server.port",
+                "server.port", "linux.default_image",
             ] {
                 let result = await controlPlane.updateConfig(.init(values: [key: "x"]))
                 #expect(result.error?.contains("not editable") == true, "\(key) must be refused")
@@ -75,5 +75,37 @@ struct ConfigWriteTests {
             let text = try String(contentsOf: url, encoding: .utf8)
             #expect(text == Self.file)
         }
+    }
+
+    @Test("repositories can be removed over the API but not added, nor all removed")
+    func reposOnlyShrink() async throws {
+        try await withControlPlane { controlPlane, url in
+            let two = Self.file.replacingOccurrences(
+                of: #"repos = ["acme/widgets"]"#, with: #"repos = ["acme/widgets", "acme/gizmos"]"#)
+            try two.write(to: url, atomically: true, encoding: .utf8)
+            for widening in ["[acme/widgets, mallory/anything]", "[]"] {
+                let result = await controlPlane.updateConfig(.init(values: ["github.repos": widening]))
+                #expect(result.error?.contains("only be removed") == true, "\(widening) must be refused")
+            }
+            let text = try String(contentsOf: url, encoding: .utf8)
+            #expect(text == two)
+
+            let removed = await controlPlane.updateConfig(.init(values: ["github.repos": "[acme/gizmos]"]))
+            #expect(removed.error == nil)
+        }
+    }
+
+    /// The backstop behind the editor: whatever text it produces, only the
+    /// keys asked for may load differently.
+    @Test("an edit that changes keys it was not asked to is refused")
+    func editsStayInTheirLane() throws {
+        var before = SaplingConfig()
+        before.github.repos = ["acme/widgets"]
+        var after = before
+        after.linux.maxConcurrent = 9
+        after.linux.buildImages.toggle()
+        let refusal = try ControlPlane.refusal(
+            of: .init(values: ["linux.max_concurrent": "9"]), before: before, after: after)
+        #expect(refusal?.contains("linux.build_images") == true)
     }
 }

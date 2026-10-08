@@ -139,8 +139,10 @@ How it is kept:
   cache as it was.
 - **Only the default branch writes it.** A job's clone replaces the cache only
   if GitHub says it succeeded on the default branch, on the runner Sapling
-  started for it. Any other job — a pull request's included — starts from the
-  default branch's cache and throws its own changes away. See
+  started for it, from a `push`, `schedule` or `workflow_dispatch` run whose
+  commit the branch contains. Any other job — a pull request's, a tag's, or a
+  comment-triggered one included — starts from the default branch's cache and
+  throws its own changes away. See
   [SECURITY.md](../SECURITY.md) for why.
 - **Least recently used goes first** once the whole cache passes
   `max_size_gb`.

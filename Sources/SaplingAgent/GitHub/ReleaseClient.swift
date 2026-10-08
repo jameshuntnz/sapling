@@ -45,9 +45,9 @@ public struct AvailableUpdate: Codable, Sendable {
 
 /// Reads Sapling's own releases from GitHub.
 ///
-/// Uses the same credentials as job polling. The repository is private, so
-/// even listing releases needs authentication — and downloading an asset needs
-/// `Contents: Read-only` on the App, which job polling does not require.
+/// Uses the same credentials as job polling, so a private repository's
+/// releases can be read — downloading an asset needs `Contents: Read-only` on
+/// the App, which job polling does not require.
 actor ReleaseClient {
     private let config: SaplingConfig
     private let tokens: GitHubTokenProvider
@@ -165,7 +165,7 @@ actor ReleaseClient {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("sapling/\(SaplingVersion.current)", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: CredentialRedirectGuard())
         guard let http = response as? HTTPURLResponse else {
             throw GitHubError(statusCode: -1, message: "no HTTP response")
         }
@@ -180,5 +180,26 @@ actor ReleaseClient {
             throw GitHubError(statusCode: http.statusCode, message: message)
         }
         return data
+    }
+}
+
+/// Keeps the GitHub credential on GitHub's API host.
+///
+/// An asset download redirects to a storage host. The token is set by hand,
+/// so it is dropped whenever a redirect changes host, and an `https` request
+/// is never followed to plain `http`.
+final class CredentialRedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        let original = task.originalRequest?.url
+        guard let target = request.url else { return nil }
+        if original?.scheme == "https", target.scheme != "https" { return nil }
+        var request = request
+        if target.host?.lowercased() != original?.host?.lowercased() {
+            request.setValue(nil, forHTTPHeaderField: "Authorization")
+        }
+        return request
     }
 }

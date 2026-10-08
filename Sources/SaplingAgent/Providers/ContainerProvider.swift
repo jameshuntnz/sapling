@@ -220,6 +220,7 @@ struct ContainerProvider: JobProvider, Sendable {
             "https://github.com/actions/runner/releases/download/v${VERSION}/actions-runner-linux-arm64-${VERSION}.tar.gz"
           tar xzf runner.tar.gz && rm runner.tar.gz
         fi
+        \(JobGate.installScript(repo: request.repo))
         exec ./run.sh --jitconfig \(shellQuote(request.jitConfig))
         """
     }

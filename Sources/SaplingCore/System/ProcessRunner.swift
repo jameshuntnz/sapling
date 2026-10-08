@@ -9,12 +9,14 @@ public enum ProcessRunner {
     /// child process gets these prepended.
     ///
     /// Without this, `tart` and `container` resolve fine in an interactive shell
-    /// and mysteriously don't when running under the LaunchDaemon.
+    /// and mysteriously don't when running under the LaunchDaemon. System
+    /// directories come first: Homebrew's are writable by the console user,
+    /// and the root daemon must not run their `pfctl` or `tar`.
     public static let extraPaths = [
-        "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+        "/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin",
     ]
 
-    /// The environment child processes inherit, with Homebrew on `PATH`.
+    /// The environment child processes inherit, with Homebrew on `PATH` after the system.
     ///
     /// - Parameter overrides: Extra variables to set or replace.
     /// - Returns: The environment to hand to a child process.
@@ -215,7 +217,8 @@ public enum ProcessRunner {
         _ executable: String,
         _ arguments: [String] = [],
         environment: [String: String]? = nil,
-        currentDirectory: URL? = nil
+        currentDirectory: URL? = nil,
+        standardInput: String? = nil
     ) -> AsyncThrowingStream<OutputChunk, Error> {
         AsyncThrowingStream { continuation in
             guard let resolved = which(executable) else {
@@ -233,6 +236,8 @@ public enum ProcessRunner {
             let errPipe = Pipe()
             process.standardOutput = outPipe
             process.standardError = errPipe
+            let inPipe = standardInput.map { _ in Pipe() }
+            if let inPipe { process.standardInput = inPipe }
 
             outPipe.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
@@ -270,6 +275,13 @@ public enum ProcessRunner {
             } catch {
                 continuation.finish(throwing: error)
                 return
+            }
+            if let inPipe, let standardInput {
+                let data = Data(standardInput.utf8)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    inPipe.fileHandleForWriting.write(data)
+                    try? inPipe.fileHandleForWriting.close()
+                }
             }
 
             continuation.onTermination = { reason in

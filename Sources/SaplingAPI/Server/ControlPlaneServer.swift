@@ -39,6 +39,7 @@ public struct ControlPlaneServer: Sendable {
 
             app.middleware = .init()
             app.middleware.use(JSONErrorMiddleware())
+            app.middleware.use(BrowserGuardMiddleware())
 
             let advertised = "http://\(resolution.hostname):\(config.server.port)"
             // Publish it so the CLI on this machine can find us without

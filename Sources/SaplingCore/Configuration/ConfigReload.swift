@@ -94,12 +94,15 @@ public enum ConfigReload {
     /// API has no auth — tailnet membership is the access control (§8) — so
     /// anything on the tailnet could otherwise point `update.repository` at
     /// releases of its choosing and then ask the node to install one, open
-    /// the node to public repositories' forks, or start sharing build output
-    /// between jobs. Those stay a file edit on the node itself.
+    /// the node to public repositories' forks, start sharing build output
+    /// between jobs, or choose the image Linux jobs and their secrets run in.
+    /// Those stay a file edit on the node itself. `github.repos` stays, but
+    /// the API refuses any edit that adds to it.
     public static let apiEditableKeys: Set<String> = reloadableKeys.subtracting([
         "update.repository",
         "github.allow_public_repos",
         "build_cache.enabled",
+        "linux.default_image",
     ])
 
     /// Fields that are never rendered, whatever they contain.

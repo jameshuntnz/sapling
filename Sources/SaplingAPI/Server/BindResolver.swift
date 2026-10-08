@@ -43,20 +43,34 @@ enum BindResolver {
             result.succeeded
         {
             let address = result.trimmedOutput.split(separator: "\n").first.map(String.init)
-            if let address, !address.isEmpty { return address }
+            if let address, isCGNAT(address) { return address }
         }
-        // Tailscale hands out addresses from 100.64.0.0/10 on a utun device.
         if let result = try? await ProcessRunner.run("ifconfig", [], timeout: .seconds(10)),
             result.succeeded
         {
-            for line in result.stdout.split(separator: "\n") {
-                // Continuation lines are tab-indented; splitting on spaces
-                // alone leaves "\tinet" and matches nothing.
-                let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
-                guard let index = fields.firstIndex(of: "inet"), index + 1 < fields.count else { continue }
-                let address = fields[index + 1]
-                if isCGNAT(address) { return address }
+            return tunnelCGNATAddress(inIfconfig: result.stdout)
+        }
+        return nil
+    }
+
+    /// The first CGNAT address on a `utun` device.
+    ///
+    /// Tailscale allocates from 100.64.0.0/10 on one; a carrier or another VPN
+    /// can put the same range on `en0`, and binding there would publish the
+    /// API to that network.
+    static func tunnelCGNATAddress(inIfconfig output: String) -> String? {
+        var interface = ""
+        for line in output.split(separator: "\n") {
+            // Interface headers start in column zero; their details are
+            // tab-indented, and splitting on spaces alone misses "\tinet".
+            if let first = line.first, !first.isWhitespace {
+                interface = String(line.prefix { $0 != ":" })
+                continue
             }
+            guard interface.hasPrefix("utun") else { continue }
+            let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard let index = fields.firstIndex(of: "inet"), index + 1 < fields.count else { continue }
+            if isCGNAT(fields[index + 1]) { return fields[index + 1] }
         }
         return nil
     }

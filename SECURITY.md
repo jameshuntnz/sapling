@@ -60,7 +60,12 @@ consequences of the model, not defects in it:
   images and old logs (`POST /api/v1/disk/cleanup`). Each is bounded so that
   tailnet access does not become control of what the node trusts. Config
   writes are limited to an allowlist that excludes `update.repository`,
-  `github.allow_public_repos`, every credential and every restart-only key.
+  `github.allow_public_repos`, `build_cache.enabled`, `linux.default_image`,
+  every credential and every restart-only key; `github.repos` may only shrink,
+  never to empty. A forced update reinstalls but never downgrades. Requests
+  carrying an `Origin` header, or a `Host` that isn't an address, `localhost`,
+  a single-label or MagicDNS name, are refused, so a web page cannot drive the
+  API from a tailnet member's browser.
   Disk cleanup re-checks its target against a fresh listing and refuses the
   base image, job clones and anything running.
 - **With `[build_cache]` on, jobs of one repository share build output.**
@@ -74,10 +79,18 @@ consequences of the model, not defects in it:
   didn't. Jobs in different repositories never share a directory. Off by
   default.
 - **The daemon runs as root**, because managing the pf anchor requires it.
-- **A refused fork job stays queued on GitHub** until GitHub's own timeout.
-  Sapling declines it; it cannot withdraw it, because GitHub has no per-job
-  cancel and cancelling the run would take down the GitHub-hosted jobs beside
-  it in a contributor's pull request.
+- **A refused fork job stays queued on GitHub** until GitHub's own timeout,
+  or until a runner Sapling started for another job picks it up — a JIT
+  runner takes any queued job its labels match, and GitHub offers no way to
+  tie one to a job. The job-started hook every runner is given fails such a
+  job before its first step, so it shows as failed rather than queued.
+  Sapling cannot withdraw it sooner: GitHub has no per-job cancel, and
+  cancelling the run would take down the GitHub-hosted jobs beside it in a
+  contributor's pull request.
+- **The node's console user is root-equivalent.** Every `tart` and
+  `container` call runs in that user's session, and the daemon reads its
+  configuration from that user's `~/.sapling`. Anything that runs as that
+  user can change what the root daemon does. Treat the account like root.
 
 ### In scope — these are vulnerabilities
 
@@ -108,6 +121,14 @@ Sapling supports public repositories on one condition that cannot be
 configured away: a run is admitted only when its `head_repository.full_name`
 matches the repository being watched. Fork pull requests are refused on every
 repository, public or private.
+
+That check runs twice. On the host it decides which jobs get a runner. Inside
+the guest, a job-started hook reads the job's event payload before any step
+and fails the job unless every repository it names as the code's origin
+(`pull_request.head.repo`, `workflow_run.head_repository`) is the watched one.
+It also refuses `issue_comment` on a pull request, which anyone can trigger.
+The second check exists because the first cannot stop a runner from taking a
+different job than the one it was started for.
 
 That closes the path that made public repos dangerous. It closes nothing else,
 so do both of these as well:

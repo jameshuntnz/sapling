@@ -68,9 +68,8 @@ struct Update: AsyncParsableCommand {
         print("  running   \(status.current)  \(Style.dim("(\(status.channel.rawValue) channel)"))")
 
         guard let available = status.available else {
-            // --force exists for the case where the newest release is not
-            // *newer* — reinstalling the same version, or recovering a node
-            // whose reported version outranks anything published.
+            // --force reinstalls the same version. The daemon refuses an
+            // older one; that is `sapling upgrade --binary` on the node.
             guard force, !check else {
                 print("  \(Style.green("up to date"))")
                 return
@@ -146,7 +145,7 @@ struct Update: AsyncParsableCommand {
         }
     }
 
-    /// Install the newest release on the channel regardless of precedence.
+    /// Reinstall the newest release on the channel, if it is not older than the running one.
     func forceReinstall(client: SaplingClient) async {
         do {
             let result = try await client.applyUpdate(force: true)

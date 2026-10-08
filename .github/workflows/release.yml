@@ -47,9 +47,13 @@ jobs:
   release:
     # workflow_run fires on *every* completion, cancelled and failed included,
     # so the conclusion has to be checked explicitly or a red CI run publishes.
+    # `branches: [main]` matches a fork's branch called main too, so only a
+    # push to this repository may publish.
     if: >-
       github.event_name == 'workflow_dispatch'
-      || github.event.workflow_run.conclusion == 'success'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
     # Sapling releases itself, on the node Sapling provisioned.
     runs-on: [self-hosted, macos, arm64]
     timeout-minutes: 45
@@ -164,7 +168,16 @@ jobs:
           if [ "${{ steps.version.outputs.channel }}" = "stable" ]; then
             git push origin HEAD:main
           fi
-          git push origin "$TAG" 2>&1 | tail -2 || echo "tag already on the remote"
+          # An existing remote tag is fine only if it is this commit: publishing
+          # creates a missing tag at main's head, not at what was built.
+          if ! git push origin "$TAG"; then
+            REMOTE=$(git ls-remote origin "refs/tags/$TAG^{}" | cut -f1)
+            if [ "$REMOTE" != "$(git rev-parse "$TAG^{}")" ]; then
+              echo "::error::could not push $TAG, and the remote tag is not this commit"
+              exit 1
+            fi
+            echo "tag already on the remote"
+          fi
 
       # Uses the REST API rather than `gh`, which the base VM image does not
       # carry — and adding it would be one more thing the image has to keep

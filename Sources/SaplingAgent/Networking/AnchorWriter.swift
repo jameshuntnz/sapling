@@ -68,6 +68,10 @@ actor AnchorWriter {
             throw NetworkGuardError.loadFailed(
                 load.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+        // Loaded is not the same as in force: pf may be off, or pf.conf may
+        // no longer reach the anchor. Either way no job may start.
+        let state = await NetworkGuard.verify()
+        if case .inactive(let reason) = state { throw NetworkGuardError.loadFailed(reason) }
         loaded = rules
     }
 }

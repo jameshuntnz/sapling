@@ -19,6 +19,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   check:
     # Sapling builds itself, on the node Sapling provisioned.

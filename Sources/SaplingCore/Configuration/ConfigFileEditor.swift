@@ -138,24 +138,49 @@ public enum ConfigFileEditor {
 
     private static func bracketDepth(of code: String) -> Int {
         var depth = 0
-        var inString = false
-        for character in code {
-            if character == "\"" { inString.toggle() }
-            guard !inString else { continue }
+        forEachCodeCharacter(in: code) { _, character in
             if character == "[" { depth += 1 }
             if character == "]" { depth -= 1 }
+            return true
         }
         return depth
     }
 
     /// A line without its comment, ignoring `#` inside strings.
     private static func code(of line: String) -> String {
-        var inString = false
-        for (offset, character) in line.enumerated() {
-            if character == "\"" { inString.toggle() }
-            if character == "#", !inString { return String(line.prefix(offset)) }
+        var cut: Int?
+        forEachCodeCharacter(in: line) { offset, character in
+            guard character == "#" else { return true }
+            cut = offset
+            return false
         }
-        return line
+        return cut.map { String(line.prefix($0)) } ?? line
+    }
+
+    /// Visits the characters of `line` outside TOML strings.
+    ///
+    /// Stops when `body` returns false. Escapes are honoured in basic strings:
+    /// a value written as `"a\" ["` must not read as an open bracket.
+    private static func forEachCodeCharacter(in line: String, _ body: (Int, Character) -> Bool) {
+        var quote: Character?
+        var escaped = false
+        for (offset, character) in line.enumerated() {
+            if let open = quote {
+                if escaped {
+                    escaped = false
+                } else if open == "\"" && character == "\\" {
+                    escaped = true
+                } else if character == open {
+                    quote = nil
+                }
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                continue
+            }
+            guard body(offset, character) else { return }
+        }
     }
 
     private static func trailingComment(of line: String) -> String {

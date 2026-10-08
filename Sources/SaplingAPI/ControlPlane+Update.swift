@@ -38,7 +38,7 @@ extension ControlPlane {
     /// install is waiting on.
     ///
     /// - Parameter force: Install now even while jobs are running, failing
-    ///   them, and whether or not the release outranks what is running.
+    ///   them, and reinstall the running version. Never installs an older one.
     /// - Returns: What is being applied, or why nothing is.
     public func applyUpdate(force: Bool) async -> UpdateApplyResponse {
         guard await UpdateGate.shared.enter() else {
@@ -63,8 +63,8 @@ extension ControlPlane {
         let updater = SelfUpdater(config: live)
         let update: AvailableUpdate?
         do {
-            // With force, take the newest release on the channel whether or not
-            // it outranks what is running. Without it, only a genuine upgrade.
+            // With force, take the newest release on the channel even if it is
+            // the running version. Without it, only a genuine upgrade.
             update = force ? try await updater.newestRelease() : try await updater.check()
         } catch {
             return UpdateApplyResponse(
@@ -75,6 +75,16 @@ extension ControlPlane {
                 applying: false,
                 message: "already on \(SaplingVersion.current), the newest on the "
                     + "\(live.update.channel.rawValue) channel")
+        }
+        // The API is unauthenticated, and `update.channel` is editable through
+        // it, so force may reinstall but never roll the node back.
+        if let running = SemanticVersion(SaplingVersion.current),
+            let offered = SemanticVersion(update.version), offered < running
+        {
+            return UpdateApplyResponse(
+                applying: false,
+                message: "\(update.version) is older than the running \(SaplingVersion.current); "
+                    + "roll back on the node itself with `sapling upgrade --binary`")
         }
 
         let staged: StagedRelease

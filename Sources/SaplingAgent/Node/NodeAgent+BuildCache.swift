@@ -33,8 +33,14 @@ extension NodeAgent {
         let refusal: String?
         if let jobID = Int64(job.id), let remote = try? await github.job(repo: job.repo, jobID: jobID) {
             let defaultBranch = try? await github.defaultBranch(repo: job.repo)
+            let run = try? await github.run(repo: job.repo, runID: remote.runId)
+            var merged: Bool?
+            if let defaultBranch, let sha = remote.headSha {
+                merged = try? await github.branch(defaultBranch, contains: sha, repo: job.repo)
+            }
             refusal = BuildCachePolicy.refusal(
-                remote: remote, runnerName: runnerName, defaultBranch: defaultBranch)
+                remote: remote, run: run, repo: job.repo, runnerName: runnerName,
+                defaultBranch: defaultBranch, onDefaultBranch: merged)
         } else {
             refusal = "GitHub could not be asked how the job ended"
         }

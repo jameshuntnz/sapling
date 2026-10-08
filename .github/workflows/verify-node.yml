@@ -22,6 +22,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+
 jobs:
   # --- TESTING.md phase 2 ---------------------------------------------------
   linux:

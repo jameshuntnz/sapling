@@ -46,6 +46,14 @@ struct BindResolverTests {
         #expect(!BindResolver.isCGNAT("not-an-ip"))
     }
 
+    @Test("takes a CGNAT address only from a tunnel interface")
+    func tunnelOnly() {
+        let carrier = "en0: flags=8863<UP>\n\tinet 100.70.1.2 netmask 0xffc00000\n"
+        #expect(BindResolver.tunnelCGNATAddress(inIfconfig: carrier) == nil)
+        let tailnet = carrier + "utun4: flags=8051<UP>\n\tinet 100.101.102.103 --> 100.101.102.103\n"
+        #expect(BindResolver.tunnelCGNATAddress(inIfconfig: tailnet) == "100.101.102.103")
+    }
+
     @Test("parses bind modes from config text")
     func bindModeParsing() {
         #expect(BindMode(rawValue: "tailscale") == .tailscale)
