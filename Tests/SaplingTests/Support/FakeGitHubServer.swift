@@ -36,6 +36,7 @@ final class FakeGitHubState: @unchecked Sendable {
 struct FakeGitHubFixtures {
     var queuedRunIDs: [Int64] = [100]
     var inProgressRunIDs: [Int64] = []
+    var pendingRunIDs: [Int64] = []
     /// Raw `.../runs/:id/jobs` payload per run id.
     var jobsByRun: [Int64: String] = [:]
     /// Raw `.../actions/jobs/:id` payload per job id.
@@ -89,7 +90,13 @@ struct FakeGitHubServer {
                 return Self.json(#"{"message":"Server Error"}"#, status: .internalServerError)
             }
             let status = (try? request.query.get(String.self, at: "status")) ?? ""
-            let ids = status == "queued" ? fixtures.queuedRunIDs : fixtures.inProgressRunIDs
+            let ids: [Int64]
+            switch status {
+            case "queued": ids = fixtures.queuedRunIDs
+            case "in_progress": ids = fixtures.inProgressRunIDs
+            case "pending": ids = fixtures.pendingRunIDs
+            default: ids = []
+            }
             let runs = ids.map { id -> String in
                 let provenance: String
                 if fixtures.runsWithoutHeadRepository.contains(id) {

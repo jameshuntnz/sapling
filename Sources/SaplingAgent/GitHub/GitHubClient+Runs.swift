@@ -28,8 +28,10 @@ extension GitHubClient {
     /// that did not come from that repo.
     ///
     /// There's no "list queued jobs for a repo" endpoint, so this walks the
-    /// runs that could plausibly contain one — `queued` runs, plus
-    /// `in_progress` runs, which routinely have later jobs still waiting.
+    /// runs that could plausibly contain one — `queued` runs, `in_progress`
+    /// runs, which routinely have later jobs still waiting, and `pending` runs,
+    /// which is where GitHub can leave a run after its concurrency group frees
+    /// up, with its job queued but the run never listed as `queued`.
     ///
     /// `ForkPolicy` is applied to each run **before** its jobs are fetched, for
     /// two reasons. Provenance is a property of the run, so nothing is learned
@@ -42,7 +44,7 @@ extension GitHubClient {
     /// not.
     func queuedWork(repo: String) async throws -> QueuedWork {
         var runs: [Int64: WorkflowRun] = [:]
-        for status in ["queued", "in_progress"] {
+        for status in ["queued", "in_progress", "pending"] {
             let response = try await request(
                 "GET",
                 "/repos/\(repo)/actions/runs?status=\(status)&per_page=50",
