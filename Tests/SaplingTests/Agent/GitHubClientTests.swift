@@ -177,6 +177,22 @@ struct GitHubClientTests {
 
     /// The assertion that matters is `jobsRequests`, not the returned jobs.
     ///
+    /// GitHub can leave a run `pending` with its job `queued`, after a
+    /// cancelled run releases their shared concurrency group.
+    @Test("collects queued jobs from pending runs")
+    func pendingRunJobs() async throws {
+        var fixtures = FakeGitHubFixtures()
+        fixtures.queuedRunIDs = []
+        fixtures.pendingRunIDs = [100]
+        fixtures.jobsByRun = [100: FakeGitHubFixtureLibrary.mixedStatuses]
+
+        let server = try await FakeGitHubServer.start(fixtures: fixtures)
+        let client = GitHubClient(config: server.githubConfig())
+        let jobs = try await client.queuedWork(repo: "acme/widgets").jobs
+        await server.shutdown()
+        #expect(jobs.map(\.id) == [9001])
+    }
+
     /// A fork's run must be refused *before* its jobs are fetched: the pipeline
     /// downstream reads a repository's image definitions at the job's commit
     /// and builds them on the node, outside any container, so a refusal that
