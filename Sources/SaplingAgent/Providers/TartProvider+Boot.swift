@@ -24,9 +24,11 @@ extension TartProvider {
     /// - Parameters:
     ///   - vmName: The clone to boot.
     ///   - buildCache: Host directory to share as the build cache, if any.
+    ///   - softnet: Whether to isolate the VM with Softnet.
     /// - Returns: Everything after `tart` on the command line.
-    static func runArguments(vmName: String, buildCache: URL?) -> [String] {
+    static func runArguments(vmName: String, buildCache: URL?, softnet: Bool = false) -> [String] {
         var arguments = ["run", "--no-graphics"]
+        if softnet { arguments.append("--net-softnet") }
         if let buildCache {
             arguments.append("--dir=\(buildCacheShareName):\(buildCache.path)")
         }

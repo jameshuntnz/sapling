@@ -204,13 +204,13 @@ GitHub is now authoritative. But the staleness itself is unaddressed.)*
 **Closed.** `sapling update` asks the daemon to update itself; since the daemon
 is already root, no `sudo` is involved. See [RELEASING.md](RELEASING.md).
 
-Two things it opened, both worth doing:
+Two things it opened:
 
-- **Releases are not code-signed.** The daemon verifies a downloaded archive
-  against the `SHA256SUMS` published beside it, which catches corruption but
-  not a compromised repository — the checksums come from the same place as the
-  archive. Signing with a Developer ID and verifying the signature before
-  installing would close it.
+- **Releases are signed with a key, not a Developer ID.** The workflow signs
+  `SHA256SUMS` and the tag with an Ed25519 key held as the `release`
+  environment's secret, and nodes check it against keys built into the binary
+  (`ReleaseSignature`). That stops a repository write from becoming a node
+  install; it does not give Gatekeeper anything to check.
 - **The node builds its own updates.** CI runs on the node, so a compromised
   node would build and then install its compromised release. Acceptable for a
   single-owner private setup; worth knowing before it is one.

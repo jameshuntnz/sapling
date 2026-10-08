@@ -31,6 +31,11 @@ public struct TartProvider: JobProvider, Sendable {
             throw ProviderError(
                 "`tart` is not installed. Run `sapling install`, or `brew install cirruslabs/cli/tart`.")
         }
+        if config.softnet, ProcessRunner.which("softnet") == nil {
+            throw ProviderError(
+                "macos.softnet is on but `softnet` is not installed: `brew install cirruslabs/cli/softnet`, "
+                    + "then let it run as root (see docs/NETWORKING.md).")
+        }
         guard FileManager.default.fileExists(atPath: sshKeyPath) else {
             throw ProviderError("no VM SSH key at \(sshKeyPath). Run `sapling install` to generate one.")
         }
@@ -79,7 +84,8 @@ public struct TartProvider: JobProvider, Sendable {
         // `process`, because nothing awaits this task — see `VMBootProcess`
         // for the five minutes that cost.
         let process = VMBootProcess()
-        let runArguments = Self.runArguments(vmName: vmName, buildCache: request.buildCacheDirectory)
+        let runArguments = Self.runArguments(
+            vmName: vmName, buildCache: request.buildCacheDirectory, softnet: config.softnet)
         let bootTask = Task.detached {
             do {
                 let command = try await Self.tart(runArguments)

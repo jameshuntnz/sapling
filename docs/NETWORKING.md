@@ -247,6 +247,14 @@ own connections into a guest pass on state. Guests get no IPv6, and a packet
 arriving on a bridge must come from a job subnet. pf being off, or pf.conf no
 longer reaching the anchor, fails the job the same way a load error does.
 
+pf sees routed traffic, not two guests talking on the same bridge. Two macOS
+VMs share one, so `macos.softnet = true` runs each on Tart's Softnet, which
+pins a VM to its own MAC and DHCP address and to public destinations plus the
+gateway. That stops one job's VM taking another's address and receiving the
+SSH session that carries its runner. It needs `brew install
+cirruslabs/cli/softnet`, set up to run as root as its README describes, and is
+off until it has run on the node.
+
 ### 2. At start — the host check, then the guest check
 
 In that order, and the order is the point.

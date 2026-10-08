@@ -188,6 +188,6 @@ du -sh ~/.sapling/runner-cache
 ### Logs
 
 ```bash
-tail -f ~/.sapling/logs/sapling.err.log
+tail -f /Library/Logs/Sapling/sapling.err.log
 sudo launchctl print system/dev.sapling.daemon
 ```

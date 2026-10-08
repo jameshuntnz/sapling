@@ -34,7 +34,7 @@ jobs:
       - run: uname -a
       - run: |
           echo "container hostname: $(hostname)"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - run: ls -la
 
   # --- TESTING.md phase 3 ---------------------------------------------------
@@ -45,7 +45,7 @@ jobs:
       - run: sw_vers
       - run: uname -m
       - run: xcodebuild -version || echo "no Xcode in this image"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - run: ls -la
 
   # --- TESTING.md phase 4: the one that actually matters --------------------

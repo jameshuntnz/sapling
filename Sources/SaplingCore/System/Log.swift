@@ -1,7 +1,7 @@
 import Foundation
 
 /// Deliberately minimal: the daemon's stdout/stderr are captured by launchd
-/// into `~/.sapling/logs/`, and per-job detail lives in the `runs` table
+/// into `/Library/Logs/Sapling/`, and per-job detail lives in the `runs` table
 /// where the API can serve it.
 public enum Log {
     /// Whether `debug` output is emitted.

@@ -10,7 +10,8 @@ import SaplingCore
 /// three separate reasons:
 ///
 /// - **A flush leaves a window with no rules at all.** `pfctl -a sapling -F
-///   all` empties the anchor before the new ruleset is loaded. One caller
+///   all` empties the anchor before the new ruleset is loaded, which is why
+///   it is only the fallback when a plain load is refused. One caller
 ///   flushing while the other believes it has just finished loading means
 ///   jobs running unfiltered, which is the one outcome §8 rules out.
 /// - **They can compute different rulesets.** The rules include whatever
@@ -51,19 +52,19 @@ actor AnchorWriter {
 
         try rules.write(toFile: path, atomically: true, encoding: .utf8)
 
-        // The rules genuinely changed, so the old ones have to go first —
-        // reloading an anchor whose tables are still referenced fails with
-        // "Resource busy". This leaves a brief unfiltered window, which is why
-        // it only happens when something actually changed, and why it happens
-        // under this actor rather than from two callers at once.
-        _ = try? await ProcessRunner.run("pfctl", ["-a", anchor, "-F", "all"], timeout: .seconds(20))
-
         // pf may be disabled entirely on a fresh machine; -E enables it and
         // bumps a reference count, which is safe to call repeatedly.
         _ = try? await ProcessRunner.run("pfctl", ["-E"], timeout: .seconds(20))
 
-        let load = try await ProcessRunner.run(
-            "pfctl", ["-a", anchor, "-f", path], timeout: .seconds(30))
+        // A load replaces the anchor in one transaction, so try that first:
+        // flushing leaves jobs already running unfiltered until the load
+        // lands. Only when pf refuses — "Resource busy" on a table still
+        // referenced — is the old ruleset flushed first.
+        var load = try await ProcessRunner.run("pfctl", ["-a", anchor, "-f", path], timeout: .seconds(30))
+        if !load.succeeded {
+            _ = try? await ProcessRunner.run("pfctl", ["-a", anchor, "-F", "all"], timeout: .seconds(20))
+            load = try await ProcessRunner.run("pfctl", ["-a", anchor, "-f", path], timeout: .seconds(30))
+        }
         guard load.succeeded else {
             throw NetworkGuardError.loadFailed(
                 load.stderr.trimmingCharacters(in: .whitespacesAndNewlines))

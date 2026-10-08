@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import SaplingCore
 import Vapor
@@ -87,6 +86,11 @@ actor CacheProxy {
     let config: CacheConfig
     let root: URL
     private let session: URLSession
+    /// Bytes written since the last prune.
+    ///
+    /// A job can fetch large files under endless distinct URLs, so waiting
+    /// for the hourly prune could fill the disk.
+    private var writtenSincePrune: Int64 = 0
     /// Short revalidation window for mutable content — long enough to
     /// collapse the burst of identical requests a single job makes, short
     /// enough that a freshly published version isn't missed for long.
@@ -178,6 +182,12 @@ actor CacheProxy {
 
         let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"
         try store(tempURL: tempURL, bodyURL: bodyURL, metaURL: metaURL, contentType: contentType)
+        writtenSincePrune +=
+            (try? FileManager.default.attributesOfItem(atPath: bodyURL.path)[.size] as? Int64) ?? 0
+        if writtenSincePrune > Int64(config.maxSizeGB) * 1_073_741_824 / 10 {
+            writtenSincePrune = 0
+            await prune()
+        }
         return CachedFile(path: bodyURL, contentType: contentType)
     }
 
@@ -205,24 +215,6 @@ actor CacheProxy {
         try fm.moveItem(at: tempURL, to: bodyURL)
         let meta = CacheMetadata(contentType: contentType, storedAt: Date())
         try SaplingJSON.encoder.encode(meta).write(to: metaURL, options: .atomic)
-    }
-
-    /// Hash the path so arbitrarily deep module paths can't blow past the
-    /// filesystem's name limits, and keep a readable suffix for debugging.
-    ///
-    /// Every job on the node shares these entries, and immutable ones are
-    /// served forever, so the hash must resist a job crafting a collision
-    /// with a package another repository depends on.
-    static func cacheKey(upstream: String, path: String) -> String {
-        let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
-        let readable =
-            path
-            .split(separator: "/")
-            .suffix(2)
-            .joined(separator: "_")
-            .filter { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-" }
-            .suffix(60)
-        return hash + "_" + readable
     }
 
     struct CacheEntry: Sendable {

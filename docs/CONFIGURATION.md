@@ -34,6 +34,7 @@ enabled = true
 base_image = "sapling-macos-base"
 max_concurrent = 2   # clamped to 2 — Apple's limit
 ssh_username = "admin"
+softnet = false      # isolate VMs from each other with Tart's Softnet — see NETWORKING.md
 
 [linux]
 enabled = true

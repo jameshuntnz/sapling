@@ -19,7 +19,11 @@ public enum SaplingPaths {
     /// The SQLite database backing the control plane.
     public static var databaseFile: URL { home.appendingPathComponent("sapling.db") }
     /// Where launchd writes the daemon's output.
-    public static var logsDirectory: URL { home.appendingPathComponent("logs") }
+    ///
+    /// Root-owned, not under `~/.sapling`: launchd opens these files as root,
+    /// and a user-owned directory would let that user aim them, by symlink,
+    /// at any file on the machine.
+    public static var logsDirectory: URL { URL(fileURLWithPath: "/Library/Logs/Sapling") }
     /// Scratch state that survives a restart.
     public static var stateDirectory: URL { home.appendingPathComponent("state") }
     /// Backing store for the pull-through package caches.
@@ -79,7 +83,7 @@ public enum SaplingPaths {
         } else {
             try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
         }
-        for sub in [logsDirectory, stateDirectory, runnerCacheDirectory] {
+        for sub in [stateDirectory, runnerCacheDirectory] {
             if !fm.fileExists(atPath: sub.path) {
                 try fm.createDirectory(at: sub, withIntermediateDirectories: true)
             }

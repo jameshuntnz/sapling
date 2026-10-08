@@ -87,10 +87,12 @@ consequences of the model, not defects in it:
   Sapling cannot withdraw it sooner: GitHub has no per-job cancel, and
   cancelling the run would take down the GitHub-hosted jobs beside it in a
   contributor's pull request.
-- **The node's console user is root-equivalent.** Every `tart` and
+- **The node's console user is close to root.** Every `tart` and
   `container` call runs in that user's session, and the daemon reads its
-  configuration from that user's `~/.sapling`. Anything that runs as that
-  user can change what the root daemon does. Treat the account like root.
+  configuration from that user's `~/.sapling`. The daemon's own binary and
+  logs are root-owned and it installs only signed releases, but that user
+  still controls every job's VM, including the ones that build releases.
+  Treat the account as you would root.
 
 ### In scope — these are vulnerabilities
 
@@ -114,6 +116,9 @@ consequences of the model, not defects in it:
   triggers.
 - **Update-channel attacks**: getting a node to install an artifact that isn't
   the one the release published, or downgrading it past its channel rules.
+  Nodes install only releases whose `SHA256SUMS` and tag carry a signature
+  from a key built into the binary, so write access to the repository alone
+  should not be enough.
 
 ## Running a public repository safely
 

@@ -16,10 +16,23 @@ extension SaplingStore {
             expiresAt: Date().addingTimeInterval(ttl)
         )
         try await writer.write { db in
+            // The endpoint has no auth, so an expired token is dropped and the
+            // live ones are capped rather than left to pile up.
+            try db.execute(
+                sql: "DELETE FROM join_tokens WHERE expires_at < ? OR used_at IS NOT NULL",
+                arguments: [Date()])
+            try db.execute(
+                sql: """
+                    DELETE FROM join_tokens WHERE token IN (
+                      SELECT token FROM join_tokens ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)
+                    """, arguments: [Self.maxOutstandingJoinTokens - 1])
             try JoinTokenRecord(token).insert(db)
         }
         return token
     }
+
+    /// How many unused tokens may be outstanding at once.
+    static let maxOutstandingJoinTokens = 20
 
     /// Marks a token used and reports whether it was valid.
     ///

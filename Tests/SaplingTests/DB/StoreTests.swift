@@ -147,6 +147,18 @@ struct StoreTests {
         #expect(try await store.consumeJoinToken(expired.token) == false)
     }
 
+    /// Anyone on the tailnet can ask for one, so they must not pile up.
+    @Test("only the newest join tokens stay outstanding")
+    func joinTokenCap() async throws {
+        let store = try makeStore()
+        var tokens: [String] = []
+        for _ in 0..<(SaplingStore.maxOutstandingJoinTokens + 5) {
+            tokens.append(try await store.createJoinToken(ttl: 60).token)
+        }
+        #expect(try await store.consumeJoinToken(tokens[0]) == false)
+        #expect(try await store.consumeJoinToken(tokens[tokens.count - 1]))
+    }
+
     @Test("prunes only old terminal jobs")
     func pruning() async throws {
         let store = try makeStore()

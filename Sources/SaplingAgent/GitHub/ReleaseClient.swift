@@ -98,12 +98,12 @@ actor ReleaseClient {
             size: asset.size)
     }
 
-    /// Download a release's binary archive and its checksums.
+    /// Download a release's binary archive, its checksums and their signature.
     ///
     /// - Parameter tag: The release tag to fetch.
-    /// - Returns: Local paths to the archive and the `SHA256SUMS` file.
-    /// - Throws: `GitHubError` if either asset is missing or cannot be fetched.
-    func download(tag: String) async throws -> (archive: URL, checksums: URL) {
+    /// - Returns: Local paths to the archive, `SHA256SUMS` and its signature.
+    /// - Throws: `GitHubError` if any asset is missing or cannot be fetched.
+    func download(tag: String) async throws -> (archive: URL, checksums: URL, signature: URL) {
         guard let release = try await releases().first(where: { $0.tagName == tag }) else {
             throw GitHubError(statusCode: 404, message: "no release tagged \(tag)")
         }
@@ -117,9 +117,18 @@ actor ReleaseClient {
                 statusCode: 404,
                 message: "release \(tag) publishes no SHA256SUMS, so it cannot be verified")
         }
+        guard let signature = release.assets.first(where: { $0.name == ReleaseSignature.assetName }) else {
+            throw GitHubError(
+                statusCode: 404,
+                message: "release \(tag) publishes no \(ReleaseSignature.assetName), so it cannot be trusted")
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sapling-update-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return (
-            archive: try await downloadAsset(archive, named: archive.name),
-            checksums: try await downloadAsset(checksums, named: "SHA256SUMS")
+            archive: try await downloadAsset(archive, named: archive.name, into: directory),
+            checksums: try await downloadAsset(checksums, named: "SHA256SUMS", into: directory),
+            signature: try await downloadAsset(signature, named: ReleaseSignature.assetName, into: directory)
         )
     }
 
@@ -140,16 +149,15 @@ actor ReleaseClient {
         return try decoder.decode([GitHubRelease].self, from: data)
     }
 
-    private func downloadAsset(_ asset: GitHubReleaseAsset, named name: String) async throws -> URL {
+    private func downloadAsset(
+        _ asset: GitHubReleaseAsset, named name: String, into destination: URL
+    ) async throws -> URL {
         // The octet-stream Accept header is what makes this return the asset
         // rather than its JSON metadata.
         let data = try await get(
             "\(config.github.apiBaseURL)/repos/\(config.update.repository)/releases/assets/\(asset.id)",
             accept: "application/octet-stream")
 
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sapling-update-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let file = destination.appendingPathComponent(name)
         try data.write(to: file)
         return file

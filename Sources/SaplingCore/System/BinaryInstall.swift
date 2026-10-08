@@ -26,4 +26,24 @@ public enum BinaryInstall {
         }
         try fileManager.setAttributes(attributes, ofItemAtPath: target)
     }
+
+    /// Takes back ownership of an installed binary that is not root's.
+    ///
+    /// The daemon runs this on start, because the release that brought this
+    /// check was installed by a daemon that did not have it.
+    ///
+    /// - Parameter path: The installed binary.
+    /// - Returns: Whether ownership was changed.
+    @discardableResult
+    public static func reclaim(_ path: String) -> Bool {
+        let fileManager = FileManager.default
+        guard geteuid() == 0, let attributes = try? fileManager.attributesOfItem(atPath: path),
+            attributes[.type] as? FileAttributeType == .typeRegular,
+            (attributes[.ownerAccountID] as? Int) != 0 || (attributes[.groupOwnerAccountID] as? Int) != 0
+        else { return false }
+        return
+            (try? fileManager.setAttributes(
+                [.ownerAccountID: 0, .groupOwnerAccountID: 0, .posixPermissions: 0o755], ofItemAtPath: path))
+            != nil
+    }
 }

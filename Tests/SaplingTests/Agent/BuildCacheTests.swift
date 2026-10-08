@@ -119,6 +119,9 @@ struct BuildCacheTests {
             vmName: "sapling-job-1", buildCache: URL(fileURLWithPath: "/cache/leases/1"))
         #expect(shared == ["run", "--no-graphics", "--dir=sapling-cache:/cache/leases/1", "sapling-job-1"])
         #expect(TartProvider.runArguments(vmName: "vm", buildCache: nil) == ["run", "--no-graphics", "vm"])
+        #expect(
+            TartProvider.runArguments(vmName: "vm", buildCache: nil, softnet: true)
+                == ["run", "--no-graphics", "--net-softnet", "vm"])
     }
 }
 

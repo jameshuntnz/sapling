@@ -44,6 +44,14 @@ public struct MacOSConfig: Codable, Sendable {
     /// is refused, not left queued forever on a node that can never satisfy it.
     /// `nil` means only the node's memory budget limits it.
     public var maxMemoryGB: Int?
+    /// Run each VM on Tart's Softnet instead of plain vmnet NAT.
+    ///
+    /// Softnet pins a VM to its own MAC and DHCP address and to public
+    /// destinations plus its gateway, so one job's VM cannot spoof another's
+    /// address and intercept the SSH session that carries its runner. Needs
+    /// the `softnet` binary (`brew install cirruslabs/cli/softnet`), set up to
+    /// run as root. Off by default until it has been run on the node.
+    public var softnet: Bool
 
     /// What a prepared base image asks for, when config names no size.
     ///
@@ -72,6 +80,7 @@ public struct MacOSConfig: Codable, Sendable {
         case cpuCount = "cpu_count"
         case memoryGB = "memory_gb"
         case maxMemoryGB = "max_memory_gb"
+        case softnet
     }
 
     /// Creates a platform configuration.
@@ -86,9 +95,11 @@ public struct MacOSConfig: Codable, Sendable {
         jobTimeoutSeconds: Int = 7200,
         cpuCount: Int? = nil,
         memoryGB: Int? = nil,
-        maxMemoryGB: Int? = nil
+        maxMemoryGB: Int? = nil,
+        softnet: Bool = false
     ) {
         self.enabled = enabled
+        self.softnet = softnet
         self.baseImage = baseImage
         self.maxConcurrent = maxConcurrent
         self.sshUsername = sshUsername
@@ -115,6 +126,7 @@ public struct MacOSConfig: Codable, Sendable {
         cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount)
         memoryGB = try c.decodeIfPresent(Int.self, forKey: .memoryGB)
         maxMemoryGB = try c.decodeIfPresent(Int.self, forKey: .maxMemoryGB)
+        softnet = try c.decodeIfPresent(Bool.self, forKey: .softnet) ?? false
     }
 }
 

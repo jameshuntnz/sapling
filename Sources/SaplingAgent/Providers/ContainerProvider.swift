@@ -85,7 +85,11 @@ struct ContainerProvider: JobProvider, Sendable {
                 "image pull reported: \(pull.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        let args = runArguments(name: name, image: image, request: request)
+        // The runner credential reaches `container` in a file only the session
+        // user can read; its arguments are visible to everyone through `ps`.
+        let secrets = try await Self.writeRunnerEnvironment(jitConfig: request.jitConfig)
+        defer { try? FileManager.default.removeItem(at: secrets.deletingLastPathComponent()) }
+        let args = runArguments(name: name, image: image, request: request, envFile: secrets.path)
         let runCommand = try await SessionCommand.invocation("container", args)
 
         await events.record(RunEventName.containerStarted, detail: "\(name) (\(image))")
@@ -182,8 +186,8 @@ struct ContainerProvider: JobProvider, Sendable {
     /// would otherwise die with `Exec format error`. With Rosetta exposed, that
     /// one binary is translated and the rest of the build — JVM, Kotlin, dex —
     /// still runs natively. See `LinuxConfig.rosetta` for what the image owes.
-    func runArguments(name: String, image: String, request: JobRunRequest) -> [String] {
-        var args = ["run", "--rm", "--name", name]
+    func runArguments(name: String, image: String, request: JobRunRequest, envFile: String) -> [String] {
+        var args = ["run", "--rm", "--name", name, "--env-file", envFile]
         if let cpu = config.cpuCount { args += ["--cpus", String(cpu)] }
         if let memory = request.memoryGB ?? config.memoryGB {
             args += ["--memory", "\(memory)g"]
@@ -221,7 +225,9 @@ struct ContainerProvider: JobProvider, Sendable {
           tar xzf runner.tar.gz && rm runner.tar.gz
         fi
         \(JobGate.installScript(repo: request.repo))
-        exec ./run.sh --jitconfig \(shellQuote(request.jitConfig))
+        sapling_jit="$SAPLING_JIT"
+        unset SAPLING_JIT
+        exec ./run.sh --jitconfig "$sapling_jit"
         """
     }
 
@@ -255,5 +261,36 @@ struct ContainerProvider: JobProvider, Sendable {
             reaped.append(container.id)
         }
         return reaped
+    }
+
+    /// Writes `SAPLING_JIT=<config>` to a fresh 0600 file in a 0700 directory,
+    /// both owned by the user `container` runs as.
+    ///
+    /// In /tmp, not `$TMPDIR`: root's is private to root, and `container`
+    /// reads the file as the session user.
+    static func writeRunnerEnvironment(jitConfig: String) async throws -> URL {
+        let directory = URL(fileURLWithPath: "/tmp").appendingPathComponent(
+            "sapling-env-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let file = directory.appendingPathComponent("runner.env")
+        guard
+            FileManager.default.createFile(
+                atPath: file.path, contents: Data("SAPLING_JIT=\(jitConfig)\n".utf8),
+                attributes: [.posixPermissions: 0o600])
+        else {
+            try? FileManager.default.removeItem(at: directory)
+            throw ProviderError("could not write the runner's environment file")
+        }
+        if geteuid() == 0 {
+            guard let user = await SessionCommand.sessionUser(), let uid = Int(user.uid) else {
+                try? FileManager.default.removeItem(at: directory)
+                throw ProviderError("no console user to hand the runner's environment file to")
+            }
+            for path in [directory.path, file.path] {
+                try FileManager.default.setAttributes([.ownerAccountID: uid], ofItemAtPath: path)
+            }
+        }
+        return file
     }
 }

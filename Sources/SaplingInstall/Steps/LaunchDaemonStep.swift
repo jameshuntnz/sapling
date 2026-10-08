@@ -14,6 +14,12 @@ public struct LaunchDaemonStep: InstallStep {
         guard FileManager.default.fileExists(atPath: SaplingPaths.launchDaemonPlist.path) else {
             return .fixable("not registered")
         }
+        // Logs under ~/.sapling let the console user point a root-opened file
+        // anywhere; a plist from before they moved is worth reinstalling.
+        let installed = (try? String(contentsOf: SaplingPaths.launchDaemonPlist, encoding: .utf8)) ?? ""
+        guard installed.contains(SaplingPaths.logsDirectory.path) else {
+            return .fixable("the registered plist still logs under ~/.sapling")
+        }
         guard
             let result = try? await ProcessRunner.run(
                 "launchctl",
@@ -33,6 +39,9 @@ public struct LaunchDaemonStep: InstallStep {
             throw InstallError("registering a LaunchDaemon needs root — re-run with sudo")
         }
         try SaplingPaths.ensureHomeDirectory()
+        try FileManager.default.createDirectory(
+            at: SaplingPaths.logsDirectory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755, .ownerAccountID: 0, .groupOwnerAccountID: 0])
 
         let plist = Self.plistContents(runAsUser: runAsUser)
         try plist.write(to: SaplingPaths.launchDaemonPlist, atomically: true, encoding: .utf8)
@@ -102,9 +111,9 @@ public struct LaunchDaemonStep: InstallStep {
                 <key>ThrottleInterval</key>
                 <integer>10</integer>
                 <key>StandardOutPath</key>
-                <string>\(home)/logs/sapling.out.log</string>
+                <string>\(SaplingPaths.logsDirectory.path)/sapling.out.log</string>
                 <key>StandardErrorPath</key>
-                <string>\(home)/logs/sapling.err.log</string>
+                <string>\(SaplingPaths.logsDirectory.path)/sapling.err.log</string>
                 <key>WorkingDirectory</key>
                 <string>\(home)</string>
             \(userElement)    <key>EnvironmentVariables</key>

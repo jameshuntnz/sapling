@@ -182,7 +182,7 @@ struct Update: AsyncParsableCommand {
         fail(
             """
             the daemon did not come back within 40s. Check it with:
-              ssh <node> 'tail ~/.sapling/logs/sapling.err.log'
+              ssh <node> 'tail /Library/Logs/Sapling/sapling.err.log'
             The previous binary is kept at \(SaplingPaths.installedBinary).previous
             """)
     }

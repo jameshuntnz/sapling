@@ -25,7 +25,8 @@ import SaplingCore
 public enum SessionCommand {
     /// The user whose session owns the container apiserver.
     ///
-    /// The console user, since that is the session automatic login creates.
+    /// The console user, since that is the session automatic login creates,
+    /// and only when that user owns `SaplingPaths.home`.
     /// Resolved per call rather than cached: it costs a couple of milliseconds
     /// against a container operation measured in seconds, and a stale answer
     /// after a re-login would be far more annoying than the lookup.
@@ -41,8 +42,22 @@ public enum SessionCommand {
         guard let id = try? await ProcessRunner.run("id", ["-u", name]), id.succeeded else {
             return nil
         }
+        let uid = id.trimmedOutput
 
-        return (name: name, uid: id.trimmedOutput)
+        // Whoever is at the console runs every VM and container, so it must be
+        // the account Sapling was installed for — the owner of its home — and
+        // not someone who switched users in at the login window.
+        if geteuid() == 0,
+            let owner = try? FileManager.default.attributesOfItem(atPath: SaplingPaths.home.path)[
+                .ownerAccountID]
+                as? Int,
+            String(owner) != uid
+        {
+            Log.warn(
+                "the console user \(name) does not own \(SaplingPaths.home.path); refusing to act as them")
+            return nil
+        }
+        return (name: name, uid: uid)
     }
 
     /// How to invoke `tool` with the given arguments from this process.

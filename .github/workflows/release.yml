@@ -57,9 +57,10 @@ jobs:
     # Sapling releases itself, on the node Sapling provisioned.
     runs-on: [self-hosted, macos, arm64]
     timeout-minutes: 45
+    environment: release
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0  # version derivation needs full history and tags
           # A workflow_run job checks out the default branch by default, which
@@ -118,6 +119,10 @@ jobs:
 
       - name: Build and package
         if: steps.version.outputs.release == 'true'
+        env:
+          # An environment secret, so only the branches the `release`
+          # environment allows can sign. Nodes refuse an unsigned release.
+          SAPLING_RELEASE_SIGNING_KEY: ${{ secrets.SAPLING_RELEASE_SIGNING_KEY }}
         run: |
           # Named from the tag rather than the version: an asset name carrying
           # "+" risks being mangled in transit, and the daemon matches the
@@ -132,6 +137,8 @@ jobs:
           # The daemon verifies this before installing anything it downloads.
           shasum -a 256 *.tar.gz > SHA256SUMS
           cat SHA256SUMS
+          ../.build/release/sapling release-key sign \
+            --tag "${{ steps.version.outputs.tag }}" SHA256SUMS > SHA256SUMS.sig
 
       # Only a finished release moves the version recorded in the source. A dev
       # build's version is derived, and committing one per push would both spam
@@ -214,7 +221,7 @@ jobs:
           fi
           echo "created release $RELEASE_ID for $TAG"
 
-          for FILE in dist/*.tar.gz dist/SHA256SUMS; do
+          for FILE in dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.sig; do
             NAME=$(basename "$FILE")
             echo "uploading $NAME"
             curl -sS --fail-with-body \

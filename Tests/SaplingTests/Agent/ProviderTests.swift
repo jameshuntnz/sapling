@@ -59,7 +59,7 @@ struct ProviderTests {
         }
     }
 
-    @Test("Linux runner script quotes the JIT config and handles a bare image")
+    @Test("Linux runner script keeps the JIT config out of itself and handles a bare image")
     func runnerScript() {
         let provider = ContainerProvider(config: LinuxConfig())
         let script = provider.runnerScript(
@@ -71,8 +71,9 @@ struct ProviderTests {
                 labels: ["self-hosted", "linux"]
             ))
 
-        #expect(script.contains("'abc123=='"))
-        #expect(script.contains("exec ./run.sh --jitconfig"))
+        // The script is a `container` argument, which `ps` shows to everyone.
+        #expect(!script.contains("abc123"))
+        #expect(script.contains(#"exec ./run.sh --jitconfig "$sapling_jit""#))
         // Bails on the first failure rather than running the job half-set-up.
         #expect(script.contains("set -euo pipefail"))
         // Falls back to downloading the runner if the image doesn't ship one.
@@ -96,13 +97,13 @@ struct ProviderTests {
 
         // Default config asks for neither, so the CLI sees neither flag.
         let plain = ContainerProvider(config: LinuxConfig())
-            .runArguments(name: "sapling-x", image: "img", request: request)
+            .runArguments(name: "sapling-x", image: "img", request: request, envFile: "/tmp/e")
         #expect(!plain.contains("--rosetta"))
         #expect(!plain.contains("--arch"))
 
         let tuned = ContainerProvider(
             config: LinuxConfig(cpuCount: 6, memoryGB: 10, arch: "arm64", rosetta: true)
-        ).runArguments(name: "sapling-x", image: "img", request: request)
+        ).runArguments(name: "sapling-x", image: "img", request: request, envFile: "/tmp/e")
         #expect(tuned.contains("--rosetta"))
         #expect(zip(tuned, tuned.dropFirst()).contains { $0 == "--arch" && $1 == "arm64" })
         #expect(zip(tuned, tuned.dropFirst()).contains { $0 == "--cpus" && $1 == "6" })
@@ -113,6 +114,8 @@ struct ProviderTests {
         #expect(tuned.dropLast(3).last == "/bin/bash")
         #expect(tuned[tuned.count - 3] == "img")
         #expect(tuned[tuned.count - 2] == "-c")
+        #expect(zip(plain, plain.dropFirst()).contains { $0 == "--env-file" && $1 == "/tmp/e" })
+        #expect(!plain.joined(separator: " ").contains("abc123"))
     }
 
     /// A node asking for Rosetta it hasn't got should fail at startup with an
@@ -273,5 +276,19 @@ struct OrphanReapingTests {
         let listed: [[String: Any]] = [["name": "sapling-job-lower"], ["Name": "sapling-job-upper"]]
         let reapable = TartProvider.reapableVMNames(from: listed, protecting: "sapling-macos-base")
         #expect(Set(reapable) == ["sapling-job-lower", "sapling-job-upper"])
+    }
+
+    @Test("the runner's environment file is private and parses as KEY=value")
+    func runnerEnvironmentFile() async throws {
+        let file = try await ContainerProvider.writeRunnerEnvironment(jitConfig: "ab+/cd==")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let text = try String(contentsOf: file, encoding: .utf8)
+        #expect(text == "SAPLING_JIT=ab+/cd==\n")
+        let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        let dirMode =
+            try FileManager.default.attributesOfItem(
+                atPath: file.deletingLastPathComponent().path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+        #expect(dirMode == 0o700)
     }
 }

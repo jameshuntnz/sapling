@@ -108,7 +108,7 @@ struct Install: AsyncParsableCommand {
         if report.isComplete {
             print(Style.green("Sapling is installed and running."))
             print("  Check it with:  sapling status")
-            print("  Follow logs:    tail -f \(InstallContext.saplingHome)/logs/sapling.err.log")
+            print("  Follow logs:    tail -f \(SaplingPaths.logsDirectory.path)/sapling.err.log")
         } else {
             print("Re-run `sapling install` once the manual steps above are done.")
         }

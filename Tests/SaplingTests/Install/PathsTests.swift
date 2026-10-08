@@ -30,7 +30,6 @@ extension EnvironmentDependentTests {
 
                 let attributes = try FileManager.default.attributesOfItem(atPath: home.path)
                 #expect(attributes[.posixPermissions] as? Int == 0o700)
-                #expect(FileManager.default.fileExists(atPath: SaplingPaths.logsDirectory.path))
                 #expect(FileManager.default.fileExists(atPath: SaplingPaths.stateDirectory.path))
                 #expect(FileManager.default.fileExists(atPath: SaplingPaths.runnerCacheDirectory.path))
             }
