@@ -20,6 +20,12 @@ public struct NetworkConfig: Codable, Sendable {
     ///
     /// Takes precedence over the blocked ranges.
     public var allowedCIDRs: [String]
+    /// Extra TCP ports a job may reach on its gateway, which is the host — an
+    /// Orchard upload listener on 8477, say.
+    ///
+    /// Added to DNS and the cache proxy's port; every other host port stays
+    /// blocked. 22 is refused.
+    public var gatewayTCPPorts: [Int]
     /// Subnets that job environments live on.
     ///
     /// Declared rather than discovered: the host bridge only exists while a VM
@@ -38,6 +44,7 @@ public struct NetworkConfig: Codable, Sendable {
         case blockPrivateRanges = "block_private_ranges"
         case extraBlockedCIDRs = "extra_blocked_cidrs"
         case allowedCIDRs = "allowed_cidrs"
+        case gatewayTCPPorts = "gateway_tcp_ports"
         case jobSubnets = "job_subnets"
     }
 
@@ -46,11 +53,13 @@ public struct NetworkConfig: Codable, Sendable {
         blockPrivateRanges: Bool = true,
         extraBlockedCIDRs: [String] = [],
         allowedCIDRs: [String] = [],
+        gatewayTCPPorts: [Int] = [],
         jobSubnets: [String] = NetworkConfig.defaultJobSubnets
     ) {
         self.blockPrivateRanges = blockPrivateRanges
         self.extraBlockedCIDRs = extraBlockedCIDRs
         self.allowedCIDRs = allowedCIDRs
+        self.gatewayTCPPorts = gatewayTCPPorts
         self.jobSubnets = jobSubnets
     }
 
@@ -60,6 +69,7 @@ public struct NetworkConfig: Codable, Sendable {
         blockPrivateRanges = try c.decodeIfPresent(Bool.self, forKey: .blockPrivateRanges) ?? true
         extraBlockedCIDRs = try c.decodeIfPresent([String].self, forKey: .extraBlockedCIDRs) ?? []
         allowedCIDRs = try c.decodeIfPresent([String].self, forKey: .allowedCIDRs) ?? []
+        gatewayTCPPorts = try c.decodeIfPresent([Int].self, forKey: .gatewayTCPPorts) ?? []
         jobSubnets = try c.decodeIfPresent([String].self, forKey: .jobSubnets) ?? Self.defaultJobSubnets
     }
 }

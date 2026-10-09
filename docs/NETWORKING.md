@@ -241,8 +241,12 @@ needed finds nothing. Config may add coverage and may never subtract it —
 `sapling install` freezes defaults into `config.toml`, and a stale file once
 left macOS VMs unfiltered while the rules read as correct.
 
-The gateway is the host, so a guest may reach it only for DHCP, DNS and the
-cache proxy's port; SSH and every other host service are blocked. The host's
+The gateway is the host, so a guest may reach it only for DHCP, DNS, the
+cache proxy's port and any TCP ports listed in `[network] gateway_tcp_ports`
+(Orchard's upload listener on 8477, say); SSH and every other host service are
+blocked, and 22 is refused in that list. Don't use `allowed_cidrs` for a host
+service: it passes before the gateway block, so listing a gateway opens every
+host port. The host's
 own connections into a guest pass on state. Guests get no IPv6, and a packet
 arriving on a bridge must come from a job subnet. pf being off, or pf.conf no
 longer reaching the anchor, fails the job the same way a load error does.

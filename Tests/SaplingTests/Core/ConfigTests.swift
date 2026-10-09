@@ -101,6 +101,7 @@ struct JobSubnetConfigTests {
         var config = SaplingConfig()
         config.github.repos = ["acme/widgets"]
         config.network.jobSubnets = ["192.168.64.0/24", "192.168.65.0/24"]
+        config.network.gatewayTCPPorts = [8477]
 
         let directory = try TemporaryDirectory()
         let url = directory.appending("config.toml")
@@ -108,6 +109,7 @@ struct JobSubnetConfigTests {
 
         let loaded = try SaplingConfig.load(from: url)
         #expect(loaded.network.jobSubnets == ["192.168.64.0/24", "192.168.65.0/24"])
+        #expect(loaded.network.gatewayTCPPorts == [8477])
     }
 
     /// A config written before this field existed must still load.
@@ -124,6 +126,7 @@ struct JobSubnetConfigTests {
             block_private_ranges = true
             """)
         #expect(config.network.jobSubnets == NetworkConfig.defaultJobSubnets)
+        #expect(config.network.gatewayTCPPorts.isEmpty)
     }
 
     /// Empty repos is how a node says "watch whatever the App installation

@@ -49,6 +49,7 @@ images_path = ".sapling/images"   # where in each repo those definitions live
 [network]
 block_private_ranges = true    # leave this on; see NETWORKING.md
 allowed_cidrs = []             # escape hatch for a specific host
+gateway_tcp_ports = []         # host services jobs may reach, e.g. [8477] for Orchard
 
 [cache]
 enabled = true

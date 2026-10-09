@@ -19,10 +19,12 @@ struct AnchorWriterTests {
     static let gateways = ["192.168.64.1/32", "192.168.65.1/32"]
     static let blocked = NetworkGuard.defaultBlockedCIDRs
 
-    static func rules(jobnets: [String] = jobnets, allowed: [String] = [], cachePort: Int? = 8735) -> String {
+    static func rules(
+        jobnets: [String] = jobnets, allowed: [String] = [], cachePort: Int? = 8735, gatewayPorts: [Int] = []
+    ) -> String {
         NetworkGuard.anchorRules(
             jobnets: jobnets, gateways: gateways, allowed: allowed, blocked: blocked, cachePort: cachePort,
-            bridges: NetworkGuard.declaredBridges)
+            gatewayPorts: gatewayPorts, bridges: NetworkGuard.declaredBridges)
     }
 
     /// Skipping an unchanged reload is only safe if this is deterministic.
@@ -67,6 +69,26 @@ struct AnchorWriterTests {
         #expect(rules.contains("block drop quick from <sapling_jobnets> to <sapling_gateways>"))
         #expect(rules.contains("pass out quick from <sapling_gateways> to <sapling_jobnets> keep state"))
         #expect(Self.rules(cachePort: nil).contains("port { 53 }"))
+    }
+
+    /// Orchard's upload listener on the host broke when the gateway was
+    /// scoped; a configured port opens that port and nothing wider.
+    @Test("a configured gateway port joins the TCP pass line, and the gateway block stays")
+    func configuredGatewayPort() throws {
+        let rules = Self.rules(gatewayPorts: try NetworkGuard.gatewayPorts([8477]))
+        #expect(
+            rules.contains("proto tcp from <sapling_jobnets> to <sapling_gateways> port { 53, 8735, 8477 }"))
+        #expect(rules.contains("block drop quick from <sapling_jobnets> to <sapling_gateways>"))
+        #expect(!rules.contains("<sapling_allowed>"))
+        #expect(Self.rules(gatewayPorts: [8735, 53]).contains("port { 53, 8735 }"), "no duplicate ports")
+    }
+
+    @Test("SSH and out-of-range ports are refused as gateway ports")
+    func gatewayPortValidation() {
+        for bad in [22, 0, -1, 65536] {
+            #expect(throws: NetworkGuardError.self, "\(bad)") { try NetworkGuard.gatewayPorts([8477, bad]) }
+        }
+        #expect((try? NetworkGuard.gatewayPorts([1, 8477, 65535])) == [1, 8477, 65535])
     }
 
     @Test("guests get no IPv6 and cannot spoof a source outside their subnet")

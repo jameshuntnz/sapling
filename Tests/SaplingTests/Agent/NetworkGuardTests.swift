@@ -68,6 +68,7 @@ struct NetworkGuardEnforcementTests {
         #expect(config.blockPrivateRanges)
         #expect(config.extraBlockedCIDRs.contains("203.0.113.0/24"))
         #expect(config.allowedCIDRs.contains("192.168.64.1/32"))
+        #expect(config.gatewayTCPPorts.isEmpty, "no host port opens unless configured")
     }
 }
 
