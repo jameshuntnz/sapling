@@ -125,6 +125,13 @@ struct RunnerImageBuilder: Sendable {
                 [.posixPermissions: 0o644], ofItemAtPath: destination.path)
         }
 
+        // A private repository's files: handed to the user who builds them
+        // and closed to everyone else on the machine.
+        if getuid() == 0, let user = await SessionCommand.sessionUser() {
+            _ = try? await ProcessRunner.run("/usr/sbin/chown", ["-R", user.uid, context.path])
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: context.path)
+        }
+
         await events.log("building \(image.tag) from \(directory)/ (\(files.count) files)")
 
         var arguments = ["build", "--tag", image.tag]

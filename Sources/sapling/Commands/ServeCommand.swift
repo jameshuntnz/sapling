@@ -41,6 +41,10 @@ struct Serve: AsyncParsableCommand {
         }
 
         try SaplingPaths.ensureHomeDirectory()
+        for binary in [SaplingPaths.installedBinary, SaplingPaths.installedBinary + ".previous"]
+        where BinaryInstall.reclaim(binary) {
+            Log.warn("\(binary) was not owned by root; it is now")
+        }
         let store = try SaplingStore(path: SaplingPaths.databaseFile)
         let agent = NodeAgent(config: configuration, store: store, configURL: configURL)
 

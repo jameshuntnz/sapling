@@ -76,4 +76,19 @@ struct ConfigFileEditorTests {
             try ConfigFileEditor.apply(["github.app.id": "1"], to: Self.file)
         }
     }
+
+    /// Escaped quotes once desynchronised the bracket counting, so editing
+    /// one value swallowed every line up to a later one.
+    @Test("escaped quotes do not unbalance a value's extent")
+    func escapedQuotes() throws {
+        let file = #"""
+            [linux]
+            default_image = "a\" ["
+            build_images = false
+            labels = ["x\" ]]"]
+            """#
+        let edited = try ConfigFileEditor.apply(["linux.default_image": "b"], to: file)
+        #expect(edited.contains("build_images = false"))
+        #expect(edited.contains(#"labels = ["x\" ]]"]"#))
+    }
 }

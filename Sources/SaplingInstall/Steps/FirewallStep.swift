@@ -46,6 +46,8 @@ public struct FirewallStep: InstallStep {
             return .ok("anchor wired and empty; rules are written when the first job starts")
         case .unverifiable(let reason):
             return .unverified("\(Self.pfConfPath) loads the anchor, but \(reason)")
+        case .inactive(let reason):
+            return .fixable("the egress filter is not in force: \(reason)")
         }
     }
 

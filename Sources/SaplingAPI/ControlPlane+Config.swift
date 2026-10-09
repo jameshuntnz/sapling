@@ -84,7 +84,12 @@ extension ControlPlane {
                 .appendingPathComponent("sapling-config-\(UUID().uuidString).toml")
             defer { try? FileManager.default.removeItem(at: candidate) }
             try edited.write(to: candidate, atomically: false, encoding: .utf8)
-            try SaplingConfig.load(from: candidate).validate()
+            let before = try SaplingConfig.load(from: url)
+            let after = try SaplingConfig.load(from: candidate)
+            if let refusal = try Self.refusal(of: request, before: before, after: after) {
+                return refused(refusal)
+            }
+            try after.validate()
 
             try Self.backUp(url)
             try Data(edited.utf8).write(to: url)
@@ -92,6 +97,33 @@ extension ControlPlane {
             return refused(error.localizedDescription)
         }
         return await agent.reloadConfig()
+    }
+
+    /// Why an edit must not be saved, judged on what it would load as.
+    ///
+    /// The editor works on text, so this checks its result: only the keys
+    /// asked for may differ. `github.repos` may only shrink, and never to
+    /// empty, which means every repository the installation sees — adding a
+    /// repository hands everyone with push access to it a shell on the node,
+    /// which is a decision for the file on the node, not the API.
+    static func refusal(
+        of request: ConfigUpdateRequest, before: SaplingConfig, after: SaplingConfig
+    ) throws -> String? {
+        let old = try ConfigReload.flatten(before)
+        let new = try ConfigReload.flatten(after)
+        let changed = Set(old.keys).union(new.keys).filter { old[$0] != new[$0] }
+        let unasked = changed.subtracting(request.values.keys).sorted()
+        guard unasked.isEmpty else {
+            return "the edit would also have changed \(unasked.joined(separator: ", "))"
+        }
+        let watched = Set(before.github.repos.map { $0.lowercased() })
+        let added = after.github.repos.filter { !watched.contains($0.lowercased()) }
+        // An empty list means every repository the installation can see.
+        guard added.isEmpty, after.github.repos.isEmpty == before.github.repos.isEmpty else {
+            return "repositories can only be removed over the API, and not all of them; widen "
+                + "github.repos in the config file on the node"
+        }
+        return nil
     }
 
     /// How many API-made backups to keep beside the config file.

@@ -68,9 +68,8 @@ struct Update: AsyncParsableCommand {
         print("  running   \(status.current)  \(Style.dim("(\(status.channel.rawValue) channel)"))")
 
         guard let available = status.available else {
-            // --force exists for the case where the newest release is not
-            // *newer* — reinstalling the same version, or recovering a node
-            // whose reported version outranks anything published.
+            // --force reinstalls the same version. The daemon refuses an
+            // older one; that is `sapling upgrade --binary` on the node.
             guard force, !check else {
                 print("  \(Style.green("up to date"))")
                 return
@@ -146,7 +145,7 @@ struct Update: AsyncParsableCommand {
         }
     }
 
-    /// Install the newest release on the channel regardless of precedence.
+    /// Reinstall the newest release on the channel, if it is not older than the running one.
     func forceReinstall(client: SaplingClient) async {
         do {
             let result = try await client.applyUpdate(force: true)
@@ -183,7 +182,7 @@ struct Update: AsyncParsableCommand {
         fail(
             """
             the daemon did not come back within 40s. Check it with:
-              ssh <node> 'tail ~/.sapling/logs/sapling.err.log'
+              ssh <node> 'tail /Library/Logs/Sapling/sapling.err.log'
             The previous binary is kept at \(SaplingPaths.installedBinary).previous
             """)
     }

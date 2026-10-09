@@ -225,8 +225,7 @@ public struct Installer: Sendable {
         if FileManager.default.fileExists(atPath: target) {
             try FileManager.default.removeItem(atPath: target)
         }
-        try FileManager.default.copyItem(atPath: source, toPath: target)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
+        try BinaryInstall.copy(from: URL(fileURLWithPath: source).resolvingSymlinksInPath().path, to: target)
         actions.append("installed \(source) -> \(target)")
 
         _ = try? await LaunchControl.restart()

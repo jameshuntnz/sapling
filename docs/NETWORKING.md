@@ -241,6 +241,20 @@ needed finds nothing. Config may add coverage and may never subtract it —
 `sapling install` freezes defaults into `config.toml`, and a stale file once
 left macOS VMs unfiltered while the rules read as correct.
 
+The gateway is the host, so a guest may reach it only for DHCP, DNS and the
+cache proxy's port; SSH and every other host service are blocked. The host's
+own connections into a guest pass on state. Guests get no IPv6, and a packet
+arriving on a bridge must come from a job subnet. pf being off, or pf.conf no
+longer reaching the anchor, fails the job the same way a load error does.
+
+pf sees routed traffic, not two guests talking on the same bridge. Two macOS
+VMs share one, so `macos.softnet = true` runs each on Tart's Softnet, which
+pins a VM to its own MAC and DHCP address and to public destinations plus the
+gateway. That stops one job's VM taking another's address and receiving the
+SSH session that carries its runner. It needs `brew install
+cirruslabs/cli/softnet`, set up to run as root as its README describes, and is
+off until it has run on the node.
+
 ### 2. At start — the host check, then the guest check
 
 In that order, and the order is the point.
@@ -326,8 +340,10 @@ guest fetches `/_sapling/health` first and falls back to fetching directly.
 
 `CacheProxySupervisor` runs one listener per gateway and starts and stops them
 as bridges appear and vanish. It binds the gateways rather than `0.0.0.0`
-deliberately: the egress filter permits each job exactly one private address,
-and binding wider would put the cache on the LAN and the tailnet too.
+deliberately: the egress filter permits each job one private address, on the
+cache's port, and binding wider would put the cache on the LAN and the tailnet
+too. It follows redirects only over `https` to named hosts, since it runs
+outside the filter.
 
 ## Reporting
 

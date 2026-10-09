@@ -10,15 +10,12 @@ import SaplingCore
 /// bring-up meant roughly ten of them.
 ///
 /// **What this trusts.** The daemon downloads a binary and executes it as
-/// root, so the download is the security boundary. Three things guard it: the
-/// release is fetched over HTTPS from the configured repository only, the
-/// archive is checked against the `SHA256SUMS` published alongside it, and a
-/// release without checksums is refused rather than installed unverified.
-///
-/// What is *not* guarded: the checksums come from the same place as the
-/// archive, so this detects corruption and interrupted downloads, not a
-/// compromised repository. Code signing with a Developer ID would close that,
-/// and is the obvious next step — see docs/AUTOMATION-GAPS.md.
+/// root, so the download is the security boundary. The archive is checked
+/// against `SHA256SUMS`, and `SHA256SUMS` against an Ed25519 signature over it
+/// and the tag, made by a key only the release workflow holds and checked
+/// against keys built into this binary (`ReleaseSignature`). A release missing
+/// either is refused, so publishing to the repository is not enough to put a
+/// binary on a node.
 public struct SelfUpdater: Sendable {
     let config: SaplingConfig
     let client: ReleaseClient
@@ -88,14 +85,20 @@ public struct SelfUpdater: Sendable {
         guard getuid() == 0 else { throw UpdateError.notRoot }
 
         Log.info("downloading \(update.version)")
-        let (archive, checksums) = try await client.download(tag: update.tag)
+        let (archive, checksums, signature) = try await client.download(tag: update.tag)
         let staged = StagedRelease(
             version: update.version,
             binary: archive.deletingLastPathComponent().appendingPathComponent("sapling"))
-        defer { try? FileManager.default.removeItem(at: checksums.deletingLastPathComponent()) }
+        defer {
+            try? FileManager.default.removeItem(at: checksums)
+            try? FileManager.default.removeItem(at: signature)
+        }
         do {
+            try ReleaseSignature.verify(
+                signature: try String(contentsOf: signature, encoding: .utf8),
+                checksums: try Data(contentsOf: checksums), tag: update.tag)
             try verify(archive: archive, against: checksums)
-            Log.info("checksum verified")
+            Log.info("signature and checksum verified")
             _ = try await unpack(archive)
         } catch {
             discard(staged)
@@ -152,8 +155,11 @@ public struct SelfUpdater: Sendable {
     /// Extract the binary from the archive.
     func unpack(_ archive: URL) async throws -> URL {
         let directory = archive.deletingLastPathComponent()
+        // Only the one member, and owned by root rather than the release
+        // builder's uid, which bsdtar run as root would otherwise restore.
         let result = try await ProcessRunner.run(
-            "tar", ["xzf", archive.path, "-C", directory.path], timeout: .seconds(120))
+            "/usr/bin/tar", ["--no-same-owner", "-xzf", archive.path, "-C", directory.path, "sapling"],
+            timeout: .seconds(120))
         guard result.succeeded else {
             throw UpdateError.unpackFailed(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -189,8 +195,7 @@ public struct SelfUpdater: Sendable {
             try fileManager.moveItem(atPath: target, toPath: backup)
         }
         do {
-            try fileManager.copyItem(atPath: replacement, toPath: target)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
+            try BinaryInstall.copy(from: replacement, to: target)
         } catch {
             // Put the working binary back rather than leaving the node with
             // nothing to start — but only one this call moved, or a failed

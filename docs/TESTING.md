@@ -50,7 +50,7 @@ sapling doctor
 
 ```bash
 sudo launchctl print system/dev.sapling.daemon | head -20
-tail -f ~/.sapling/logs/sapling.err.log
+tail -f /Library/Logs/Sapling/sapling.err.log
 ```
 
 **Expect:** `state = running`, and a startup log line naming the repos it's watching.
@@ -222,7 +222,7 @@ sapling status --server mac-mini-01
 ## Phase 7 — Cache proxy
 
 ```bash
-grep "cache proxy" ~/.sapling/logs/sapling.err.log
+grep "cache proxy" /Library/Logs/Sapling/sapling.err.log
 du -sh ~/.sapling/runner-cache
 ```
 
@@ -272,7 +272,7 @@ sudo killall -HUP sapling         # same reload, from the node itself
 ```
 
 **Expect:** the interval change applied, the port change reported as needing a
-restart, and the running job untouched. `grep "config:" ~/.sapling/logs/sapling.out.log`
+restart, and the running job untouched. `grep "config:" /Library/Logs/Sapling/sapling.out.log`
 should show one line per applied field.
 
 Then break the file on purpose — an unclosed `[section` — and reload again.

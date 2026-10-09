@@ -42,8 +42,7 @@ public struct BinaryStep: InstallStep {
         if FileManager.default.fileExists(atPath: target) {
             try FileManager.default.removeItem(atPath: target)
         }
-        try FileManager.default.copyItem(atPath: current, toPath: target)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
+        try BinaryInstall.copy(from: URL(fileURLWithPath: current).resolvingSymlinksInPath().path, to: target)
         return "installed \(target)"
     }
 

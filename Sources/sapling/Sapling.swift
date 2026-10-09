@@ -25,6 +25,7 @@ struct Sapling: AsyncParsableCommand {
             Uncordon.self,
             Join.self,
             Demo.self,
+            ReleaseKey.self,
         ],
         defaultSubcommand: Status.self
     )

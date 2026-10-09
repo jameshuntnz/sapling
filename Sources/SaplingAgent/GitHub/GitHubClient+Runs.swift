@@ -105,4 +105,18 @@ extension GitHubClient {
     func defaultBranch(repo: String) async throws -> String? {
         try await request("GET", "/repos/\(repo)", as: RepositoryResponse.self).defaultBranch
     }
+
+    /// One workflow run, for what triggered it and where its code came from.
+    func run(repo: String, runID: Int64) async throws -> WorkflowRun {
+        try await request("GET", "/repos/\(repo)/actions/runs/\(runID)", as: WorkflowRun.self)
+    }
+
+    /// Whether `branch` already contains `sha` — that is, the commit has been
+    /// merged there, not merely given the branch's name by a tag.
+    func branch(_ branch: String, contains sha: String, repo: String) async throws -> Bool {
+        let status = try await request(
+            "GET", "/repos/\(repo)/compare/\(branch)...\(sha)?per_page=1", as: CompareResponse.self
+        ).status
+        return status == "identical" || status == "behind"
+    }
 }

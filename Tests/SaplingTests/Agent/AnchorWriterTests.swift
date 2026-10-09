@@ -16,8 +16,14 @@ import Testing
 @Suite("pf anchor writes")
 struct AnchorWriterTests {
     static let jobnets = ["192.168.64.0/24", "!192.168.64.1", "192.168.65.0/24", "!192.168.65.1"]
-    static let allowed = ["192.168.64.1/32", "192.168.65.1/32"]
+    static let gateways = ["192.168.64.1/32", "192.168.65.1/32"]
     static let blocked = NetworkGuard.defaultBlockedCIDRs
+
+    static func rules(jobnets: [String] = jobnets, allowed: [String] = [], cachePort: Int? = 8735) -> String {
+        NetworkGuard.anchorRules(
+            jobnets: jobnets, gateways: gateways, allowed: allowed, blocked: blocked, cachePort: cachePort,
+            bridges: NetworkGuard.declaredBridges)
+    }
 
     /// Skipping an unchanged reload is only safe if this is deterministic.
     ///
@@ -25,35 +31,61 @@ struct AnchorWriterTests {
     /// indefinitely.
     @Test("identical inputs produce a byte-identical anchor")
     func rulesAreDeterministic() {
-        let first = NetworkGuard.anchorRules(
-            jobnets: Self.jobnets, allowed: Self.allowed, blocked: Self.blocked)
-        let second = NetworkGuard.anchorRules(
-            jobnets: Self.jobnets, allowed: Self.allowed, blocked: Self.blocked)
-        #expect(first == second)
+        #expect(Self.rules() == Self.rules())
     }
 
     /// And a real change must still be seen, or a bridge that came up since
     /// the last job never gets filtered.
     @Test("a new subnet changes the anchor")
     func rulesChangeWithInput() {
-        let base = NetworkGuard.anchorRules(
-            jobnets: Self.jobnets, allowed: Self.allowed, blocked: Self.blocked)
-        let widened = NetworkGuard.anchorRules(
-            jobnets: Self.jobnets + ["192.168.66.0/24"], allowed: Self.allowed, blocked: Self.blocked)
-        #expect(base != widened)
+        #expect(Self.rules() != Self.rules(jobnets: Self.jobnets + ["192.168.66.0/24"]))
     }
 
     /// §8 in one assertion: the anchor must carry a block rule, and the
     /// gateway exclusions that keep the host able to reach its own VMs.
-    @Test("the anchor blocks, permits the gateways, and excludes them from the jobnets")
+    @Test("the anchor blocks, and excludes the gateways from the jobnets")
     func rulesCarryThePolicy() {
-        let rules = NetworkGuard.anchorRules(
-            jobnets: Self.jobnets, allowed: Self.allowed, blocked: Self.blocked)
+        let rules = Self.rules()
         #expect(rules.contains("block drop quick from <sapling_jobnets> to <sapling_blocked>"))
-        #expect(rules.contains("pass quick from <sapling_jobnets> to <sapling_allowed>"))
         #expect(rules.contains("!192.168.64.1"))
-        #expect(rules.contains("192.168.64.1/32"))
         #expect(rules.contains("100.64.0.0/10"), "the tailnet must be blocked")
+        #expect(!rules.contains("<sapling_allowed>"), "no allowed table without allowed ranges")
+        #expect(
+            Self.rules(allowed: ["203.0.113.7/32"]).contains(
+                "pass quick from <sapling_jobnets> to <sapling_allowed>"))
+    }
+
+    /// The gateway is the host.
+    ///
+    /// Every service it runs on all interfaces — SSH, screen sharing, the API
+    /// bound wide — answers there.
+    @Test("a guest reaches its gateway only for DHCP, DNS and the cache proxy")
+    func gatewayIsScoped() {
+        let rules = Self.rules()
+        #expect(rules.contains("to <sapling_gateways> port { 53, 67 }"))
+        #expect(rules.contains("proto tcp from <sapling_jobnets> to <sapling_gateways> port { 53, 8735 }"))
+        #expect(rules.contains("block drop quick from <sapling_jobnets> to <sapling_gateways>"))
+        #expect(rules.contains("pass out quick from <sapling_gateways> to <sapling_jobnets> keep state"))
+        #expect(Self.rules(cachePort: nil).contains("port { 53 }"))
+    }
+
+    @Test("guests get no IPv6 and cannot spoof a source outside their subnet")
+    func ipv6AndSpoofing() {
+        let rules = Self.rules()
+        #expect(rules.contains("block return in quick on { bridge100, "))
+        #expect(rules.contains("inet6 all"))
+        #expect(rules.contains("inet from ! <sapling_jobnets>"))
+    }
+
+    /// Config values are written into pf's own syntax.
+    @Test("only addresses and CIDRs are accepted as ranges")
+    func rangeValidation() {
+        for good in ["10.0.0.0/8", "192.168.64.1", "fd7a:115c:a1e5::/48"] {
+            #expect(NetworkGuard.isAddressRange(good), "\(good)")
+        }
+        for bad in ["1.1.1.1 } pass quick all {", "", "10.0.0.0/", "10.0.0.0/999", "a/b/c", "host.example"] {
+            #expect(!NetworkGuard.isAddressRange(bad), "\(bad)")
+        }
     }
 
     /// One pf, one writer.

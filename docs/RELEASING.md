@@ -84,12 +84,29 @@ The pipeline then:
    test suite. Nothing is published that hasn't passed its own checks.
 3. **Stamps the version** into `SaplingVersion.current`.
 4. **Builds and packages** `sapling-<version>-macos-arm64.tar.gz` plus
-   `SHA256SUMS`.
+   `SHA256SUMS`, and signs `SHA256SUMS` with the release key (below).
 5. **Tags**, and for a stable release commits the version stamp to `main`.
 6. **Publishes** the GitHub Release, marked prerelease for anything but
    stable and hotfix.
 
 It runs on the node itself, so Sapling builds and releases Sapling.
+
+### The release key
+
+Nodes install only releases signed by a key in `ReleaseSignature.trustedKeys`.
+The private key is the `SAPLING_RELEASE_SIGNING_KEY` secret of the `release`
+environment, which the workflow's job runs in; restrict that environment's
+deployment branches to `main` and `release/*`, or any branch someone pushes
+could sign. To make a key:
+
+```bash
+sapling release-key generate --out ~/.sapling-release-signing.key
+```
+
+It prints the public key for `trustedKeys`. Store the private key with
+`gh secret set SAPLING_RELEASE_SIGNING_KEY --env release < <file>`, then
+delete the file. To rotate, add the new public key, release, then switch the
+secret and drop the old key in a later release.
 
 **Tags carry no build metadata.** A dev version is `0.2.0-dev.7+a1b2c3d`, but
 its tag is `v0.2.0-dev.7`. `+` is literal in a URL path and a space in a query
@@ -153,9 +170,10 @@ node*, not the Mac you typed it on.
 
 What the daemon does, in order:
 
-1. **Downloads** the archive and `SHA256SUMS` from the release.
-2. **Verifies** the archive against the published checksum. A mismatch stops
-   here.
+1. **Downloads** the archive, `SHA256SUMS` and `SHA256SUMS.sig`.
+2. **Verifies** the signature over `SHA256SUMS` and the tag against the keys
+   built into the running binary, then the archive against its checksum. A
+   missing signature or a mismatch stops here.
 3. **Unpacks** and checks there is a runnable binary inside.
 4. **Waits for running jobs**, if there are any. The node drains, and the
    install happens the moment the last job finishes; nothing new starts in
@@ -187,12 +205,10 @@ sapling update --check
 
 If the running version *outranks* everything published — a locally built
 binary, or a version stamp that got ahead — then nothing published is an
-upgrade, and that is the correct answer to the question asked. To install the
-newest release anyway:
-
-```bash
-sapling update --force
-```
+upgrade, and that is the correct answer to the question asked. `sapling update
+--force` reinstalls the newest release when it is the running version, but
+never installs an older one: the API is unauthenticated, so a downgrade is done
+on the node with `sapling upgrade --binary`, as below.
 
 The development placeholder is `0.0.0-dev` precisely so this doesn't happen: a
 locally built binary sorts below every release. It was `0.1.0` once, which is a

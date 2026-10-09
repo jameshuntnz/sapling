@@ -18,7 +18,7 @@ extension NodeAgent {
         // filter can't be applied, the job fails closed rather than running.
         if config.network.blockPrivateRanges {
             do {
-                try await NetworkGuard(config: config.network).apply()
+                try await NetworkGuard(node: config).apply()
                 networkGuardApplied = true
             } catch {
                 networkGuardApplied = false

@@ -35,9 +35,11 @@ public enum ForkPolicy {
     /// actually being asked: did this code come from the repository I was told
     /// to watch?
     ///
-    /// Comparing names also covers `pull_request_target`, `workflow_run` and
-    /// `issue_comment` triggers without naming any of them: for all of them, a
-    /// run that originates in a fork reports the fork as its head repository.
+    /// This decides which jobs get a runner, not which job a runner takes:
+    /// GitHub hands a JIT runner any queued job its labels match. Runs that
+    /// execute in this repository on a fork's behalf — `issue_comment`,
+    /// `workflow_run` — also report this repository. `JobGate` checks the
+    /// job's own event payload inside the guest for both.
     ///
     /// Unknown provenance is refused rather than admitted. GitHub reports a
     /// null head repository when the fork behind a pull request has been

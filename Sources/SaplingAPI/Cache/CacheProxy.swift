@@ -86,6 +86,11 @@ actor CacheProxy {
     let config: CacheConfig
     let root: URL
     private let session: URLSession
+    /// Bytes written since the last prune.
+    ///
+    /// A job can fetch large files under endless distinct URLs, so waiting
+    /// for the hourly prune could fill the disk.
+    private var writtenSincePrune: Int64 = 0
     /// Short revalidation window for mutable content — long enough to
     /// collapse the burst of identical requests a single job makes, short
     /// enough that a freshly published version isn't missed for long.
@@ -159,7 +164,7 @@ actor CacheProxy {
             throw Abort(.badRequest, reason: "bad upstream path")
         }
 
-        let (tempURL, response) = try await session.download(from: url)
+        let (tempURL, response) = try await session.download(from: url, delegate: RedirectGuard())
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             try? FileManager.default.removeItem(at: tempURL)
             // A stale copy beats failing the job when upstream is unhappy.
@@ -177,6 +182,12 @@ actor CacheProxy {
 
         let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"
         try store(tempURL: tempURL, bodyURL: bodyURL, metaURL: metaURL, contentType: contentType)
+        writtenSincePrune +=
+            (try? FileManager.default.attributesOfItem(atPath: bodyURL.path)[.size] as? Int64) ?? 0
+        if writtenSincePrune > Int64(config.maxSizeGB) * 1_073_741_824 / 10 {
+            writtenSincePrune = 0
+            await prune()
+        }
         return CachedFile(path: bodyURL, contentType: contentType)
     }
 
@@ -204,24 +215,6 @@ actor CacheProxy {
         try fm.moveItem(at: tempURL, to: bodyURL)
         let meta = CacheMetadata(contentType: contentType, storedAt: Date())
         try SaplingJSON.encoder.encode(meta).write(to: metaURL, options: .atomic)
-    }
-
-    /// Hash the path so arbitrarily deep module paths can't blow past the
-    /// filesystem's name limits, and keep a readable suffix for debugging.
-    static func cacheKey(upstream: String, path: String) -> String {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in Array(path.utf8) {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x100_0000_01b3
-        }
-        let readable =
-            path
-            .split(separator: "/")
-            .suffix(2)
-            .joined(separator: "_")
-            .filter { $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-" }
-            .suffix(60)
-        return String(format: "%016llx", hash) + "_" + readable
     }
 
     struct CacheEntry: Sendable {

@@ -76,7 +76,7 @@ extension TartProvider {
         // Refuse an empty or suspiciously short name rather than build a
         // pattern that matches every VM on the machine, including live ones.
         guard vmName.hasPrefix(vmPrefix) else { return }
-        await kill(matching: "tart run --no-graphics \(vmName)")
+        await kill(matching: runPattern(vm: vmName))
     }
 
     /// Kill every leaked `tart run` for a job VM, whatever its name.
@@ -84,7 +84,15 @@ extension TartProvider {
     /// Startup only: the daemon has just come up, so nothing it owns is
     /// legitimately running, and anything matching belongs to a previous life.
     static func reapRunProcesses() async {
-        await kill(matching: "tart run --no-graphics \(vmPrefix)")
+        await kill(matching: runPattern(vm: vmPrefix + "[^ ]*"))
+    }
+
+    /// A `pgrep -f` pattern for `tart run` of `vm`, which comes last.
+    ///
+    /// A build cache mount sits between `--no-graphics` and the name; missing
+    /// that let a cache VM outlive its job with the cache still writable.
+    static func runPattern(vm: String) -> String {
+        "tart run --no-graphics (.* )?\(vm)$"
     }
 
     /// Send SIGTERM to every process whose command line contains `pattern`.

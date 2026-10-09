@@ -31,6 +31,11 @@ public struct TartProvider: JobProvider, Sendable {
             throw ProviderError(
                 "`tart` is not installed. Run `sapling install`, or `brew install cirruslabs/cli/tart`.")
         }
+        if config.softnet, ProcessRunner.which("softnet") == nil {
+            throw ProviderError(
+                "macos.softnet is on but `softnet` is not installed: `brew install cirruslabs/cli/softnet`, "
+                    + "then let it run as root (see docs/NETWORKING.md).")
+        }
         guard FileManager.default.fileExists(atPath: sshKeyPath) else {
             throw ProviderError("no VM SSH key at \(sshKeyPath). Run `sapling install` to generate one.")
         }
@@ -79,7 +84,8 @@ public struct TartProvider: JobProvider, Sendable {
         // `process`, because nothing awaits this task — see `VMBootProcess`
         // for the five minutes that cost.
         let process = VMBootProcess()
-        let runArguments = Self.runArguments(vmName: vmName, buildCache: request.buildCacheDirectory)
+        let runArguments = Self.runArguments(
+            vmName: vmName, buildCache: request.buildCacheDirectory, softnet: config.softnet)
         let bootTask = Task.detached {
             do {
                 let command = try await Self.tart(runArguments)
@@ -184,9 +190,11 @@ public struct TartProvider: JobProvider, Sendable {
         let command = """
             set -o pipefail
             cd ~/actions-runner
+            \(JobGate.installScript(repo: request.repo))
             \(CacheEndpoint.exportScript(cache: request.cache, platform: .macos))
             \(request.buildCacheDirectory == nil ? "" : "export SAPLING_BUILD_CACHE=\(shellQuote(Self.buildCacheGuestPath))")
-            \(exports)./run.sh --jitconfig \(shellQuote(request.jitConfig))
+            IFS= read -r sapling_jit
+            \(exports)./run.sh --jitconfig "$sapling_jit"
             """
 
         await events.record(RunEventName.runnerStarted, detail: request.runnerName)
@@ -194,7 +202,11 @@ public struct TartProvider: JobProvider, Sendable {
         let exitCode = try await withThrowingTaskGroup(of: Int32?.self) { group in
             group.addTask {
                 var status: Int32 = -1
-                for try await chunk in ProcessRunner.stream("ssh", sshArguments(ip: ip) + [command]) {
+                // The runner credential goes over stdin: ssh's arguments are
+                // visible to every local user through `ps`.
+                let stream = ProcessRunner.stream(
+                    "ssh", sshArguments(ip: ip) + [command], standardInput: request.jitConfig + "\n")
+                for try await chunk in stream {
                     switch chunk {
                     case .stdout(let text), .stderr(let text):
                         await events.log(text)

@@ -44,8 +44,8 @@ struct WorkflowRun: Decodable {
     let status: String?
     /// What triggered the run.
     ///
-    /// `push`, `pull_request`, `workflow_run`, and so on. Recorded to explain
-    /// a refusal, never to decide one.
+    /// `push`, `pull_request`, `workflow_run`, and so on. Never decides
+    /// admission; the build cache's promotion rule does read it.
     let event: String?
     let headBranch: String?
     /// Where the run's code came from, and the whole basis for admitting it.
@@ -120,6 +120,12 @@ struct GitTreeResponse: Decodable, Sendable {
 struct GitBlobResponse: Decodable, Sendable {
     let content: String
     let encoding: String
+}
+
+/// How a commit relates to a branch: `identical` or `behind` means the
+/// branch already contains it.
+struct CompareResponse: Decodable {
+    let status: String
 }
 
 struct RepositoryResponse: Decodable {
