@@ -82,7 +82,7 @@ public struct GitHubConfig: Codable, Sendable {
         installationID: String? = nil,
         privateKeyPath: String? = nil,
         repos: [String] = [],
-        pollIntervalSeconds: Int = 30,
+        pollIntervalSeconds: Int = 10,
         cancelRunWhenExhausted: Bool = false,
         allowPublicRepos: Bool = false,
         apiBaseURL: String = "https://api.github.com"
@@ -108,7 +108,7 @@ public struct GitHubConfig: Codable, Sendable {
         installationID = try c.decodeIfPresent(String.self, forKey: .installationID)
         privateKeyPath = try c.decodeIfPresent(String.self, forKey: .privateKeyPath)
         repos = try c.decodeIfPresent([String].self, forKey: .repos) ?? []
-        pollIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .pollIntervalSeconds) ?? 30
+        pollIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .pollIntervalSeconds) ?? 10
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? "https://api.github.com"
         cancelRunWhenExhausted =
             try c.decodeIfPresent(Bool.self, forKey: .cancelRunWhenExhausted) ?? false

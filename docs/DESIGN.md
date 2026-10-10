@@ -62,7 +62,7 @@ Flagged rather than silently resolved, per the design doc's §12.
 |---|---|---|
 | PAT vs GitHub App default | **Both implemented; App is the documented default**, PAT is the quick start | 15k req/hr vs 5k, and finer-grained permissions. `sapling install` offers App first. |
 | Cache proxy scope | **Go and Cargo on by default**; npm wired but off | npm/pip URL rewriting is fiddlier and nothing needs it yet. |
-| Polling vs webhooks | **Polling**, 30s default | Zero infrastructure, works behind NAT with no public endpoint, matches a Tailscale-only node. |
+| Polling vs webhooks | **Polling**, 10s default, with ETags | Zero infrastructure, works behind NAT with no public endpoint, matches a Tailscale-only node. A 304 costs no rate limit, so polling close to webhook latency is affordable. |
 
 ## Decisions that came out of building it
 

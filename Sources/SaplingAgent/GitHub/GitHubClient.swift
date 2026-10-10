@@ -12,11 +12,23 @@ actor GitHubClient {
     /// When the current rate-limit window resets.
     public private(set) var rateLimitResetAt: Date?
 
+    /// The last ETag and body per GET URL.
+    ///
+    /// GitHub doesn't count a 304 against the rate limit, which is what makes
+    /// a short poll affordable.
+    private var validated: [URL: (etag: String, body: Data)] = [:]
+    /// Run ids keep arriving, so the table is dropped rather than grown.
+    private static let validatedLimit = 512
+
     init(config: GitHubConfig) {
         self.config = config
         self.tokens = GitHubTokenProvider(config: config)
         let sessionConfig = URLSessionConfiguration.ephemeral
         sessionConfig.timeoutIntervalForRequest = 30
+        // GitHub sends `max-age=60`, and an ephemeral session still caches in
+        // memory: polls and conclusion retries were reading minute-old state.
+        sessionConfig.urlCache = nil
+        sessionConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
         sessionConfig.httpAdditionalHeaders = [
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -61,6 +73,8 @@ actor GitHubClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let cached = method == "GET" ? validated[url] : nil
+        if let cached { request.setValue(cached.etag, forHTTPHeaderField: "If-None-Match") }
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -85,11 +99,16 @@ actor GitHubClient {
             return try await requestData(method, path, body: body, retryOnAuthFailure: false)
         }
 
+        if http.statusCode == 304, let cached { return cached.body }
         guard (200..<300).contains(http.statusCode) else {
             throw GitHubError(
                 statusCode: http.statusCode,
                 message: String(decoding: data, as: UTF8.self).prefix(500).description
             )
+        }
+        if method == "GET", let etag = http.value(forHTTPHeaderField: "ETag") {
+            if validated.count >= Self.validatedLimit { validated.removeAll() }
+            validated[url] = (etag, data)
         }
         return data
     }
