@@ -82,6 +82,18 @@ struct GitHubClientTests {
         }
     }
 
+    @Test("every poll reaches GitHub, revalidating with the ETag it was given")
+    func pollsRevalidate() async throws {
+        try await withFakeGitHub { client, state in
+            let first = try await client.queuedWork(repo: "acme/widgets").jobs
+            let second = try await client.queuedWork(repo: "acme/widgets").jobs
+            #expect(state.jobsRequests.filter { $0 == 100 }.count == 2)
+            // Runs 100 and 200, both unchanged on the second poll.
+            #expect(state.notModified == 2)
+            #expect(second.map(\.id) == first.map(\.id))
+        }
+    }
+
     @Test("reads rate limit headers off responses")
     func rateLimit() async throws {
         try await withFakeGitHub { client, _ in

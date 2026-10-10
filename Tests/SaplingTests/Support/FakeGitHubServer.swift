@@ -13,17 +13,20 @@ final class FakeGitHubState: @unchecked Sendable {
     private var _deletedRunners: [Int64] = []
     private var _cancelledRuns: [Int64] = []
     private var _authAttempts = 0
+    private var _notModified = 0
 
     var jobsRequests: [Int64] { lock.withLock { _jobsRequests } }
     var jitBodies: [[String: Any]] { lock.withLock { _jitBodies } }
     var deletedRunners: [Int64] { lock.withLock { _deletedRunners } }
     var cancelledRuns: [Int64] { lock.withLock { _cancelledRuns } }
     var authAttempts: Int { lock.withLock { _authAttempts } }
+    var notModified: Int { lock.withLock { _notModified } }
 
     func recordJobsRequest(_ runID: Int64) { lock.withLock { _jobsRequests.append(runID) } }
     func recordJIT(_ body: [String: Any]) { lock.withLock { _jitBodies.append(body) } }
     func recordDelete(_ id: Int64) { lock.withLock { _deletedRunners.append(id) } }
     func recordCancelledRun(_ id: Int64) { lock.withLock { _cancelledRuns.append(id) } }
+    func recordNotModified() { lock.withLock { _notModified += 1 } }
     func nextAuthAttempt() -> Int {
         lock.withLock {
             _authAttempts += 1
@@ -130,7 +133,15 @@ struct FakeGitHubServer {
             }
             let runID = Int64(request.parameters.get("runID") ?? "0") ?? 0
             state.recordJobsRequest(runID)
-            return Self.json(fixtures.jobsByRun[runID] ?? #"{"jobs":[]}"#)
+            let payload = fixtures.jobsByRun[runID] ?? #"{"jobs":[]}"#
+            let etag = "\"\(payload.hashValue)\""
+            if request.headers.first(name: .ifNoneMatch) == etag {
+                state.recordNotModified()
+                return Response(status: .notModified, headers: ["ETag": etag])
+            }
+            let response = Self.json(payload)
+            response.headers.replaceOrAdd(name: .eTag, value: etag)
+            return response
         }
 
         app.get("repos", ":owner", ":repo", "actions", "jobs", ":jobID") { request -> Response in
@@ -216,6 +227,8 @@ struct FakeGitHubServer {
         // Mirror the rate-limit headers the client reads off every response.
         headers.add(name: "x-ratelimit-remaining", value: "4321")
         headers.add(name: "x-ratelimit-reset", value: "2000000000")
+        // What GitHub sends, so a client that honours it shows up here.
+        headers.add(name: "cache-control", value: "private, max-age=60, s-maxage=60")
         return Response(status: status, headers: headers, body: .init(string: raw))
     }
 
