@@ -24,6 +24,27 @@ extension AppModel {
         else { return nil }
         return since
     }
+
+    /// Refresh the selected job's steps, unless the job and its steps are done.
+    ///
+    /// Each refresh is a GitHub request made by the node, so a finished job
+    /// is not asked again on every poll.
+    func syncSteps(jobID: String, client: SaplingClient) async {
+        if let current = selectedJobSteps, current.jobID == jobID, current.isSettled,
+            selectedJobDetail?.job.status.isTerminal == true
+        {
+            return
+        }
+        let steps: JobStepsResponse
+        do {
+            steps = try await client.jobSteps(jobID: jobID)
+        } catch {
+            // A daemon older than the endpoint answers 404; say so, not "loading".
+            steps = JobStepsResponse(jobID: jobID, unavailableReason: error.localizedDescription)
+        }
+        guard selectedJobID == jobID else { return }
+        selectedJobSteps = steps
+    }
 }
 
 extension Job {

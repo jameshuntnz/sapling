@@ -180,6 +180,19 @@ struct ControlPlane: Sendable {
         return response
     }
 
+    /// The job's steps as GitHub reports them, asked of the agent.
+    ///
+    /// - Parameter id: The job to report on.
+    /// - Returns: Its steps, or `nil` if there is no such job.
+    /// - Throws: If the store cannot be read.
+    func jobSteps(id: String) async throws -> JobStepsResponse? {
+        guard let job = try await store.job(id: id) else { return nil }
+        guard let agent else {
+            return JobStepsResponse(jobID: id, unavailableReason: "no node agent is running in this process")
+        }
+        return await agent.steps(for: job)
+    }
+
     func createJoinToken(controlPlaneURL: String) async throws -> JoinTokenResponse {
         let token = try await store.createJoinToken()
         return JoinTokenResponse(
