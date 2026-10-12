@@ -28,6 +28,8 @@ final class AppModel {
     /// store — and a node too busy to answer for one should still answer for
     /// the other.
     var selectedJobResources: JobResourcesResponse?
+    /// The selected job's steps, as GitHub shows them on the job's page.
+    var selectedJobSteps: JobStepsResponse?
     /// The selected job's log, kept whole across polls and paging.
     let logPager = LogPager()
     /// Announces failures and outages while the panel is closed.
@@ -142,6 +144,7 @@ final class AppModel {
                 if let detail = selectedJobDetail { await logPager.sync(with: detail, client: client) }
                 self.selectedJobResources = try? await client.jobResources(
                     jobID: selectedJobID, limit: 60)
+                await syncSteps(jobID: selectedJobID, client: client)
             }
         } catch let error as ClientError {
             self.connection = .failed(error.message)
@@ -156,6 +159,7 @@ final class AppModel {
         selectedJobID = jobID
         selectedJobDetail = nil
         selectedJobResources = nil
+        selectedJobSteps = nil
         lastActionMessage = nil
         logPager.reset(jobID: jobID)
         guard let jobID else { return }
@@ -163,6 +167,7 @@ final class AppModel {
             selectedJobDetail = try? await client.job(id: jobID)
             if let detail = selectedJobDetail { await logPager.sync(with: detail, client: client) }
             selectedJobResources = try? await client.jobResources(jobID: jobID, limit: 60)
+            await syncSteps(jobID: jobID, client: client)
         }
     }
 

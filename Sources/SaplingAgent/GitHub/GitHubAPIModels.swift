@@ -18,12 +18,24 @@ struct WorkflowJob: Decodable, Sendable {
     let startedAt: Date?
     let completedAt: Date?
     let runnerName: String?
+    /// The job's steps, in order; empty until a runner has started it.
+    var steps: [WorkflowStep]? = nil
 
     var isQueued: Bool { status == "queued" }
     var isCompleted: Bool { status == "completed" }
     /// Assigned to a runner and working, which is the state that makes
     /// cancelling its run destructive.
     var isInProgress: Bool { !isQueued && !isCompleted }
+}
+
+/// One step of a job, as listed on its page.
+struct WorkflowStep: Decodable, Sendable {
+    let number: Int
+    let name: String
+    let status: String
+    let conclusion: String?
+    let startedAt: Date?
+    let completedAt: Date?
 }
 
 struct WorkflowJobsResponse: Decodable {

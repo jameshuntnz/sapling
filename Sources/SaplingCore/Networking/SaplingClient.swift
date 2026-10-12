@@ -138,6 +138,11 @@ public struct SaplingClient: Sendable {
         return try await send("GET", path, as: JobResourcesResponse.self)
     }
 
+    /// Fetches a job's steps as GitHub reports them, or why the node could not.
+    public func jobSteps(jobID: String) async throws -> JobStepsResponse {
+        try await send("GET", "api/v1/jobs/\(jobID)/steps", as: JobStepsResponse.self)
+    }
+
     /// Stops a job that is running or waiting on this node.
     ///
     /// Frees the node's slot. The job is not cancelled on GitHub, which stays

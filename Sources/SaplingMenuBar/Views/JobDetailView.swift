@@ -1,7 +1,7 @@
 import SaplingCore
 import SwiftUI
 
-/// The log viewer (§5.4).
+/// One job: its steps as GitHub shows them, and the log viewer (§5.4).
 ///
 /// Reads the `runs` event log rather than a live process stream, which means
 /// it works identically for a job that finished an hour ago and one running
@@ -14,6 +14,11 @@ struct JobDetailView: View {
 
     @Environment(AppModel.self) private var model
     @State private var confirmingCancel = false
+    @State private var pane: Pane = .steps
+
+    private enum Pane {
+        case steps, log
+    }
 
     private var job: Job { detail.job }
 
@@ -27,7 +32,20 @@ struct JobDetailView: View {
                     .padding(.vertical, 9)
             }
             Divider()
-            JobLogView(pager: model.logPager)
+            Picker("View", selection: $pane) {
+                Text("Steps").tag(Pane.steps)
+                Text("Log").tag(Pane.log)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .padding(.horizontal, Metrics.horizontalPadding)
+            .padding(.vertical, 6)
+            Divider()
+            switch pane {
+            case .steps: JobStepsView(job: job, response: model.selectedJobSteps)
+            case .log: JobLogView(pager: model.logPager)
+            }
         }
     }
 

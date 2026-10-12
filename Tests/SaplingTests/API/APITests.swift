@@ -136,6 +136,24 @@ struct APITests {
         }
     }
 
+    /// Without an agent there is no GitHub client, which is said rather than
+    /// reported as a connection problem.
+    @Test("serves a job's steps, with a reason when they cannot be read")
+    func jobSteps() async throws {
+        try await withServer { store, client in
+            try await store.saveJob(makeJob("1", status: .running))
+
+            let steps = try await client.jobSteps(jobID: "1")
+            #expect(steps.jobID == "1")
+            #expect(steps.steps.isEmpty)
+            #expect(steps.unavailableReason != nil)
+
+            await #expect(throws: ClientError.self) {
+                try await client.jobSteps(jobID: "nope")
+            }
+        }
+    }
+
     /// A job with nothing sampled still answers.
     ///
     /// A node with no agent — every test server here, and a daemon serving the
