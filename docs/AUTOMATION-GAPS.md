@@ -188,9 +188,15 @@ not match the host's; its toolchain has to satisfy your builds.
 The Tahoe image shipped runner 2.334.0. GitHub had deprecated it. The runner
 connected, was refused with `cannot receive messages`, and **exited 0** — so
 Sapling recorded a green job that had never run. *(The outcome logic is fixed;
-GitHub is now authoritative. But the staleness itself is unaddressed.)*
+GitHub is now authoritative.)* It happened again on 2026-11-08 with 2.336.0.
 
-**Suggested work:** two parts.
+**Partly closed.** When GitHub refuses a runner as deprecated, the node
+remembers the version and every later VM carrying it downloads the current
+runner first. The job that hit the refusal is requeued and runs on the next
+attempt. Each VM pays the download until the image is refreshed, and a daemon
+restart forgets the refusal, so one attempt is lost again.
+
+**Remaining work:** two parts.
 
 - `sapling image prep` updates the runner to the latest release as a matter of
   course. It's a `curl` and a `tar` over the existing directory — JIT config
