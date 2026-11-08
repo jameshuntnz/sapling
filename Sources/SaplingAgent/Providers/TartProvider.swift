@@ -141,44 +141,13 @@ public struct TartProvider: JobProvider, Sendable {
         // turns all of that into an immediate failure that names the cause.
         try await verifyEgress(ip: ip, events: events)
 
-        try await ensureRunnerPresent(ip: ip, events: events)
+        try await ensureRunnerUsable(ip: ip, events: events)
         await events.record(RunEventName.runnerRegistered, detail: request.runnerName)
 
         return try await runJob(ip: ip, request: request, events: events)
     }
 
     // MARK: - Runner
-
-    private func ensureRunnerPresent(ip: String, events: any EventSink) async throws {
-        let check = try await ProcessRunner.run(
-            "ssh",
-            sshArguments(ip: ip) + ["test -x ~/actions-runner/run.sh && echo present || echo missing"],
-            timeout: .seconds(30)
-        )
-        if check.trimmedOutput == "present" { return }
-
-        // Downloading ~200MB per job is slow enough to be worth calling out;
-        // the fix is to bake the runner into the base image.
-        await events.log(
-            "actions-runner not found in base image — downloading it into the VM (bake it in to avoid this: docs/BASE-IMAGE.md)"
-        )
-        let script = """
-            set -euo pipefail
-            mkdir -p ~/actions-runner && cd ~/actions-runner
-            VERSION=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | sed -n 's/.*"tag_name": *"v\\([^"]*\\)".*/\\1/p' | head -1)
-            curl -fsSL -o runner.tar.gz "https://github.com/actions/runner/releases/download/v${VERSION}/actions-runner-osx-arm64-${VERSION}.tar.gz"
-            tar xzf runner.tar.gz && rm runner.tar.gz
-            """
-        let install = try await ProcessRunner.run(
-            "ssh",
-            sshArguments(ip: ip) + ["bash -s"],
-            standardInput: script,
-            timeout: .seconds(900)
-        )
-        guard install.succeeded else {
-            throw ProviderError("could not install the actions runner in the VM: \(install.stderr)")
-        }
-    }
 
     private func runJob(ip: String, request: JobRunRequest, events: any EventSink) async throws -> JobOutcome
     {
@@ -210,6 +179,7 @@ public struct TartProvider: JobProvider, Sendable {
                     switch chunk {
                     case .stdout(let text), .stderr(let text):
                         await events.log(text)
+                        await Self.noteDeprecation(in: text, events: events)
                     case .exit(let code):
                         status = code
                     }
